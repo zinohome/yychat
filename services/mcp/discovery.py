@@ -31,9 +31,12 @@ def discover_and_register_mcp_tools():
                 _tool_name = tool_name
                 _tool_description = tool_description
                 _tool_input_schema = input_schema
+                # 添加工具类型标记
+                tool_type = "mcp"
                 
                 @property
                 def name(self):
+                    # 直接返回原始工具名，不添加服务器前缀
                     return self._tool_name
                 
                 @property
@@ -47,13 +50,14 @@ def discover_and_register_mcp_tools():
                 # 修复execute方法签名，使其匹配基类
                 async def execute(self, params: Dict[str, Any]):
                     try:
-                        result = mcp_manager.call_tool(tool_name, params)
+                        # 这里仍然需要使用完整的工具名（带服务器前缀）来调用
+                        result = mcp_manager.call_tool(self.name, params)
                         # 格式化结果
                         if result and len(result) > 0:
                             return result[0].get('text') or str(result)
                         return str(result)
                     except Exception as e:
-                        logger.error(f"Error executing MCP tool {tool_name}: {str(e)}")
+                        logger.error(f"Error executing MCP tool {self.name}: {str(e)}")
                         return f"执行MCP工具失败: {str(e)}"
             # 注册工具类本身，而不是实例
             tool_registry.register(DynamicMCPTool)

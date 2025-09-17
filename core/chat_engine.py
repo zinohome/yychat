@@ -56,15 +56,33 @@ class ChatEngine:
             logger.debug(f"原始消息: {messages_copy}")
             
             # 首先从记忆中检索相关内容 - 这里使用同步版本，因为会影响响应生成
-            if conversation_id != "default":
+            if conversation_id != "default" and messages_copy:
                 # 使用messages_copy的最后一条消息作为查询
-                if messages_copy:
-                    relevant_memories = self.chat_memory.get_relevant_memory(conversation_id, messages_copy[-1]["content"])
-                    if relevant_memories:
-                        # 将列表转换为字符串格式
-                        memories_str = "\n".join(relevant_memories)
-                        # 避免修改原始messages列表
-                        messages_copy = [{"role": "system", "content": f"参考记忆：\n{memories_str}"}] + messages_copy
+                relevant_memories = self.chat_memory.get_relevant_memory(conversation_id, messages_copy[-1]["content"])
+                if relevant_memories:
+                    # 估算token数量并控制在模型限制内
+                    memory_text = "\n".join(relevant_memories)
+                    memory_section = f"参考记忆：\n{memory_text}"
+                    
+                    # 估算token数 - 使用简单的估算方法
+                    # 假设每个token大约是4个字符
+                    estimated_memory_tokens = len(memory_section) // 4
+                    estimated_user_tokens = sum(len(msg.get('content', '')) for msg in messages_copy) // 4
+                    
+                    # 模型最大token限制 - 从配置中获取或使用默认值
+                    max_tokens = getattr(config, 'OPENAI_MAX_TOKENS', 8192)
+                    
+                    # 预留部分空间给系统提示和模型输出
+                    safety_margin = 0.8  # 使用80%的空间
+                    
+                    # 如果添加记忆不会导致超出限制，则添加记忆
+                    if estimated_memory_tokens + estimated_user_tokens < max_tokens * safety_margin:
+                        # 将记忆添加到消息列表开头
+                        messages_copy = [{"role": "system", "content": memory_section}] + messages_copy
+                        logger.debug(f"添加了记忆到系统提示，估算token数: {estimated_memory_tokens}")
+                    else:
+                        # 如果记忆太多，选择不添加
+                        logger.warning(f"避免超出模型token限制，不添加记忆到系统提示。\n估算记忆token: {estimated_memory_tokens}, 用户消息token: {estimated_user_tokens}, 限制: {max_tokens * safety_margin}")
             
             # 初始化allowed_tool_names为None
             allowed_tool_names = None
@@ -275,7 +293,7 @@ class ChatEngine:
                     
                     # 由于ChatCompletionMessageToolCall是一个类型别名，我们需要直接创建正确的对象
                     # 这里我们创建ChatCompletionMessageFunctionToolCall类型的对象   
-                                      
+                                       
                     formatted_tool_call = ChatCompletionMessageFunctionToolCall(
                         id=tool_call["id"],
                         type="function",

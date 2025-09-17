@@ -82,25 +82,25 @@ class MCPManager:
                 if mcp_server not in self._clients._clients:
                     raise MCPServerNotFoundError(f"MCP server '{mcp_server}' not found")
                 
-                # 构建完整的工具名（如果需要）
-                full_tool_name = tool_name
-                if not tool_name.startswith(f"{mcp_server}__"):
-                    # 检查是否存在带前缀的同名工具
-                    prefixed_tool_name = f"{mcp_server}__{tool_name}"
-                    if prefixed_tool_name in self._clients._tool_actions:
-                        full_tool_name = prefixed_tool_name
+                # 构建可能的完整工具名
+                prefixed_tool_name = f"{mcp_server}__{tool_name}"
                 
-                try:
-                    return self._clients.execute_tool(full_tool_name, arguments)
-                except Exception as e:
-                    # 如果指定服务器调用失败，尝试自动选择服务器
-                    logger.warning(f"Failed to call tool on specified server, trying auto-selection: {str(e)}")
-                    
+                # 检查是否存在带前缀的同名工具
+                if prefixed_tool_name in self._clients._tool_actions:
+                    return self._clients.execute_tool(prefixed_tool_name, arguments)
+                # 尝试直接使用原始工具名
+                elif tool_name in self._clients._tool_actions:
+                    return self._clients.execute_tool(tool_name, arguments)
+                else:
+                    raise MCPToolNotFoundError(f"MCP tool '{tool_name}' not found on server '{mcp_server}'")
+            
             # 自动选择服务器调用
             return self._clients.execute_tool(tool_name, arguments)
+        except MCPToolNotFoundError:
+            raise
         except Exception as e:
-            logger.error(f"Failed to call MCP tool {tool_name}: {str(e)}")
-            raise MCPServiceError(f"Failed to call MCP tool {tool_name}: {str(e)}")
+            logger.error(f"Failed to call MCP tool: {str(e)}")
+            raise MCPServiceError(f"Failed to call MCP tool: {str(e)}")
     
     def close(self):
         """关闭所有MCP客户端连接"""

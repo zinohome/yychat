@@ -9,7 +9,9 @@ class Config:
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1")
     OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
-    OPENAI_TEMPERATURE = float(os.getenv("OPENAI_TEMPERATURE", "0.75"))  # 在配置中直接转换为浮点数
+    OPENAI_TEMPERATURE = float(os.getenv("OPENAI_TEMPERATURE", "0.75")) # 在配置中直接转换为浮点数
+    OPENAI_MAX_TOKENS = int(os.getenv("OPENAI_MAX_TOKENS", "16384"))  # 在配置中直接转换为整数
+    TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
     
     # Mem0配置
     MEM0_API_KEY = os.getenv("MEM0_API_KEY")

@@ -33,4 +33,4 @@ class TimeTool(Tool):
         }
 
 # 注册工具
-tool_registry.register(TimeTool)
+#tool_registry.register(TimeTool)

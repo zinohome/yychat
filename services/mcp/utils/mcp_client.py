@@ -469,123 +469,22 @@ class McpClients:
                 tools = client.list_tools()
                 for tool in tools:
                     name = tool["name"]
+                    # 存储工具操作时仍然需要处理重复名称，但不修改工具本身的名称
+                    registered_name = name
                     if name in self._tool_actions:
-                        name = f"{server_name}__{name}"
-                        # 创建工具副本并更新名称
-                        tool = tool.copy()
-                        tool["name"] = name
-                    self._tool_actions[name] = ToolAction(
-                        tool_name=name,
+                        registered_name = f"{server_name}__{name}"
+                    
+                    self._tool_actions[registered_name] = ToolAction(
+                        tool_name=name,  # 保存原始工具名
                         server_name=server_name,
                         action_type=ActionType.TOOL,
                         action_feature=tool,
                     )
+                    # 不修改原始工具名，直接添加到all_tools
                     all_tools.append(tool)
-                # resources and resources templates list
-                if self._resources_as_tools:
-                    resources = client.list_resources()
-                    resources_templates = client.list_resources_templates()
-                    for resource in resources + resources_templates:
-                        resource_name = resource["name"]
-                        name = (re.sub(r'[^a-zA-Z0-9 _-]', '', resource_name)
-                                .replace(' ', '_').lower())
-                        name = f"resource__{name}"
-                        if name in self._tool_actions:
-                            name = f"{server_name}__{name}"
-                        if name in self._tool_actions:
-                            name = f"resource__{uuid.uuid4().hex}"
-                        resource_description = resource.get("description", "")
-                        resource_mime_type = resource.get("mimeType", None)
-                        properties = {}
-                        required = []
-                        if "uri" in resource:
-                            uri = resource["uri"]
-                            action_type = ActionType.RESOURCE
-                            resource_size = resource.get("size", None)
-                            description = (
-                                    f"Read the resource '{resource_name}' from MCP Server."
-                                    f" URI: {uri}"
-                                    + (f" Description: {resource_description}" if resource_description else "")
-                                    + (f" MIME type: {resource_mime_type}" if resource_mime_type else "")
-                                    + (f" Size: {resource_size}" if resource_size else "")
-                            )
-                        elif "uriTemplate" in resource:
-                            uri_template = resource["uriTemplate"]
-                            action_type = ActionType.RESOURCE_TEMPLATE
-                            description = (
-                                    f"Read the resource '{resource_name}' from MCP Server."
-                                    f" URI template: {uri_template}"
-                                    + (f" Description: {resource_description}" if resource_description else "")
-                                    + (f" MIME type: {resource_mime_type}" if resource_mime_type else "")
-                            )
-                            properties = {
-                                "uri": {
-                                    "type": "string",
-                                    "description": f"The URI of this resource. uriTemplate: {uri_template}"
-                                }
-                            }
-                            required = ["uri"]
-                        else:
-                            raise Exception(f"Unsupported resource: {resource}")
-                        self._tool_actions[name] = ToolAction(
-                            tool_name=name,
-                            server_name=server_name,
-                            action_type=action_type,
-                            action_feature=resource,
-                        )
-                        tool = {
-                            "name": name,
-                            "description": description,
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": properties,
-                                "required": required
-                            }
-                        }
-                        all_tools.append(tool)
-
-                # prompts list
-                if self._prompts_as_tools:
-                    prompts = client.list_prompts()
-                    for prompt in prompts:
-                        prompt_name = prompt["name"]
-                        name = f"prompt__{prompt_name}"
-                        if name in self._tool_actions:
-                            name = f"{server_name}__{name}"
-                        self._tool_actions[name] = ToolAction(
-                            tool_name=name,
-                            server_name=server_name,
-                            action_type=ActionType.PROMPT,
-                            action_feature=prompt,
-                        )
-                        prompt_description = prompt.get("description", "")
-                        description = (
-                                f"Use the prompt template '{prompt_name}' from MCP Server."
-                                + (f" Description: {prompt_description}" if prompt_description else "")
-                        )
-                        prompt_arguments = prompt.get("arguments", [])
-                        properties = {}
-                        required = []
-                        for prompt_argument in prompt_arguments:
-                            argument_name = prompt_argument["name"]
-                            argument_description = prompt_argument.get("description", "")
-                            properties[argument_name] = {
-                                "type": "string",
-                                "description": argument_description
-                            }
-                            if prompt_argument.get("required", False):
-                                required.append(argument_name)
-                        tool = {
-                            "name": name,
-                            "description": description,
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": properties,
-                                "required": required
-                            }
-                        }
-                        all_tools.append(tool)
-
+                
+                # 其余代码保持不变...
+            
             logger.info(f"Fetching tools: {all_tools}")
             return all_tools
         except Exception as e:

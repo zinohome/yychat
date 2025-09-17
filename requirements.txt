@@ -16,3 +16,4 @@ httpx>=0.24.0
 pytest-mock>=3.10.0
 pytest-cov>=7.0.0
 httpx-sse>=0.4.1
+tavily-python>=0.7.12

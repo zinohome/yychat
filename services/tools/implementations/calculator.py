@@ -61,4 +61,4 @@ class CalculatorTool(Tool):
         }
 
 # 注册工具
-tool_registry.register(CalculatorTool)
+#tool_registry.register(CalculatorTool)

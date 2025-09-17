@@ -26,6 +26,10 @@
     {
       "tool_name": "maps_weather",
       "description": "当涉及天气相关的问题，且问题中包含城市名时，可以使用天气工具。"
+    },
+    {
+      "tool_name": "tavily_search",
+      "description": "当需要搜索互联网以获取最新的新闻、健康信息或答案时，可以使用Tavily搜索工具。"
     }
   ]
 }

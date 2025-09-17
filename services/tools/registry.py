@@ -1,4 +1,4 @@
-from typing import Dict, Type, Optional
+from typing import Dict, Type, Optional, List
 from .base import Tool
 
 class ToolRegistry:
@@ -15,11 +15,20 @@ class ToolRegistry:
             return tool_class()
         return None
     
-    def list_tools(self) -> Dict[str, Tool]:
-        return {name: tool_class() for name, tool_class in self._tools.items()}
+    def list_tools(self, tool_type: Optional[str] = None) -> Dict[str, Tool]:
+        """列出所有可用工具，可以按类型过滤"""
+        if tool_type is None:
+            return {name: tool_class() for name, tool_class in self._tools.items()}
+        
+        # 按类型过滤工具
+        return {
+            name: tool_class()
+            for name, tool_class in self._tools.items()
+            if getattr(tool_class, 'tool_type', None) == tool_type
+        }
     
-    def get_functions_schema(self) -> list:
-        return [tool.to_function_call_schema() for tool in self.list_tools().values()]
+    def get_functions_schema(self, tool_type: Optional[str] = None) -> list:
+        return [tool.to_function_call_schema() for tool in self.list_tools(tool_type).values()]
 
 # 创建全局注册表实例
 tool_registry = ToolRegistry()

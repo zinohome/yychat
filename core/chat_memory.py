@@ -16,6 +16,13 @@ class ChatMemory:
         if memory is None:
             # 正确创建MemoryConfig对象来配置Memory，使用path而不是persist_directory
             memory_config = MemoryConfig(
+                llm={
+                    "provider": "openai",
+                    "config": {
+                        "model": config.OPENAI_MODEL,
+                        "max_tokens": config.OPENAI_MAX_TOKENS
+                    }
+                },
                 vector_store={
                     "provider": "chroma",
                     "config": {
@@ -60,10 +67,22 @@ class ChatMemory:
             try:
                 memories = self.memory.get_relevant(query, limit=limit, user_id=conversation_id)
             except AttributeError:
-                # 如果get_relevant不存在，尝试get方法并传递user_id
-                memories = self.memory.get(query, limit=limit, user_id=conversation_id)
-            
-            return [mem["content"] for mem in memories]
+                # 如果get_relevant不存在，尝试search方法（这是Mem0 v2.x的推荐方法）
+                try:
+                    memories = self.memory.search(query, limit=limit, user_id=conversation_id)
+                except AttributeError:
+                    # 如果search也不存在，尝试不带limit参数的get方法
+                    memories = self.memory.get(query, user_id=conversation_id)
+                    # 如果获取到的结果过多，手动截取
+                    if isinstance(memories, list) and len(memories) > limit:
+                        memories = memories[:limit]
+                        
+            # 处理不同格式的返回结果
+            if isinstance(memories, dict) and 'results' in memories:
+                return [mem.get('content', str(mem)) for mem in memories['results']]
+            elif isinstance(memories, list):
+                return [mem.get('content', str(mem)) for mem in memories]
+            return []
         except Exception as e:
             logger.error(f"Failed to get relevant memory: {e}")
             return []
@@ -119,6 +138,13 @@ def get_memory_config():
     """获取统一的MemoryConfig配置"""
     config = get_config()
     return MemoryConfig(
+        llm={
+            "provider": "openai",
+            "config": {
+                "model": config.OPENAI_MODEL,
+                "max_tokens": config.OPENAI_MAX_TOKENS
+            }
+        },
         vector_store={
             "provider": "chroma",
             "config": {

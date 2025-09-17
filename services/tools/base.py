@@ -1,38 +1,38 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, TypeVar, Generic
+from typing import Dict, Any, Optional
 
-T = TypeVar('T')
-
-class Tool(ABC, Generic[T]):
+class Tool(ABC):
+    # 添加工具类型属性，默认为None
+    tool_type: Optional[str] = None
+    
     @property
     @abstractmethod
-    def name(self) -> str:
+    def name(self):
         pass
     
     @property
     @abstractmethod
-    def description(self) -> str:
-        pass
-    
-    @abstractmethod
-    async def execute(self, params: Dict[str, Any]) -> T:
+    def description(self):
         pass
     
     @property
-    def parameters(self) -> Dict[str, Any]:
-        # 默认参数定义，可以在子类中覆盖
-        return {}
+    @abstractmethod
+    def parameters(self):
+        pass
     
-    def to_function_call_schema(self) -> Dict[str, Any]:
+    @abstractmethod
+    async def execute(self, params: Dict[str, Any]):
+        pass
+    
+    def to_function_call_schema(self):
         return {
-            "type": "function",  # 添加缺失的type字段
+            "type": "function",
             "function": {
                 "name": self.name,
                 "description": self.description,
                 "parameters": {
                     "type": "object",
-                    "properties": self.parameters,
-                    "required": []
+                    "properties": self.parameters
                 }
             }
         }
