@@ -6,7 +6,7 @@ from openai import OpenAI
 # 修改导入路径
 from config.config import get_config
 from config.log_config import get_logger
-from core.chat_memory import ChatMemory
+from core.chat_memory import ChatMemory, get_async_chat_memory
 from core.personality_manager import PersonalityManager
 from services.tools.manager import ToolManager
 import httpx
@@ -16,7 +16,7 @@ from services.mcp.exceptions import MCPServiceError
 from openai.types.chat.chat_completion_message_tool_call import ChatCompletionMessageToolCall
 from openai.types.chat.chat_completion_message_function_tool_call import Function
 from openai.types.chat.chat_completion_message_function_tool_call import ChatCompletionMessageFunctionToolCall
-
+from services.mcp.exceptions import MCPServiceError, MCPServerNotFoundError, MCPToolNotFoundError
 
 
 logger = get_logger(__name__)
@@ -34,7 +34,6 @@ class ChatEngine:
             http_client=httpx.Client(
                 follow_redirects=True,
                 verify=False,  # 不进行SSL验证
-                #http2=True,   # 启用HTTP/2支持
                 # 可以尝试禁用HTTP/2，如果问题持续
                 http2=False,
                 # 增加连接超时
@@ -42,6 +41,8 @@ class ChatEngine:
             )
         )
         self.chat_memory = ChatMemory()
+        # 初始化异步内存实例，用于异步操作
+        self.async_chat_memory = get_async_chat_memory()
         self.personality_manager = PersonalityManager()
         self.tool_manager = ToolManager()
     
@@ -54,7 +55,7 @@ class ChatEngine:
             
             logger.debug(f"原始消息: {messages_copy}")
             
-            # 首先从记忆中检索相关内容
+            # 首先从记忆中检索相关内容 - 这里使用同步版本，因为会影响响应生成
             if conversation_id != "default":
                 # 使用messages_copy的最后一条消息作为查询
                 if messages_copy:
@@ -100,13 +101,9 @@ class ChatEngine:
                     # 只保留allowed_tools中列出的工具
                     tools_schema = []
                     for tool in all_tools_schema:
-                        # 检查工具名称结构，可能需要调整获取方式
-                        #logger.debug(f"工具原始定义: {tool}")
                         tool_name = tool.get("function", {}).get("name")
-                        #logger.debug(f"检查工具: {tool_name}")
                         if tool_name in allowed_tool_names:
                             tools_schema.append(tool)
-                            #logger.debug(f"保留工具: {tool_name}")
                     logger.info(f"已根据人格配置过滤工具，剩余工具数量: {len(tools_schema)}")
                 else:
                     # 如果没有allowed_tools配置，则使用所有工具
@@ -186,10 +183,13 @@ class ChatEngine:
                 # 普通响应
                 content = response.choices[0].message.content
                 
-                # 保存到记忆
+                # 保存到记忆 - 使用原生异步API
                 if conversation_id:
-                    self.chat_memory.add_message(conversation_id, {"role": "assistant", "content": content})
-                    self.chat_memory.add_message(conversation_id, original_messages[-1])
+                    # 创建异步任务但不等待其完成
+                    asyncio.create_task(self._async_save_message_to_memory(
+                        conversation_id, 
+                        [{"role": "assistant", "content": content}, original_messages[-1]]
+                    ))
                 
                 return {
                     "role": "assistant",
@@ -264,7 +264,7 @@ class ChatEngine:
             # 检查是否有工具调用需要处理
             if tool_calls:
                 # 转换工具调用格式为OpenAI标准格式
-                 
+                  
                 formatted_tool_calls = []
                 for tool_call in tool_calls:
                     # 使用正确的Function类
@@ -275,7 +275,7 @@ class ChatEngine:
                     
                     # 由于ChatCompletionMessageToolCall是一个类型别名，我们需要直接创建正确的对象
                     # 这里我们创建ChatCompletionMessageFunctionToolCall类型的对象   
-                                     
+                                      
                     formatted_tool_call = ChatCompletionMessageFunctionToolCall(
                         id=tool_call["id"],
                         type="function",
@@ -300,10 +300,13 @@ class ChatEngine:
                         "stream": True
                     }
             else:
-                # 保存到记忆
+                # 保存到记忆 - 使用原生异步API
                 if conversation_id and full_content:
-                    self.chat_memory.add_message(conversation_id, {"role": "assistant", "content": full_content})
-                    self.chat_memory.add_message(conversation_id, original_messages[-1])
+                    # 创建异步任务但不等待其完成
+                    asyncio.create_task(self._async_save_message_to_memory(
+                        conversation_id, 
+                        [{"role": "assistant", "content": full_content}, original_messages[-1]]
+                    ))
                 
                 # 发送结束标志
                 yield {
@@ -415,6 +418,29 @@ class ChatEngine:
     # 获取会话记忆
     def get_conversation_memory(self, conversation_id: str) -> list:
         return self.chat_memory.get_all_memory(conversation_id)
+
+    # 异步保存消息到记忆 - 使用原生异步API
+    async def _async_save_message_to_memory(self, conversation_id: str, messages: list):
+        """异步保存消息到记忆，使用mem0的原生AsyncMemory API"""
+        try:
+            logger.debug(f"使用原生异步API保存消息到记忆: {messages}, conversation_id: {conversation_id}")
+            
+            # 批量保存消息
+            await self.async_chat_memory.add_messages_batch(conversation_id, messages)
+            
+            logger.debug("使用原生异步API保存消息到记忆完成")
+        except Exception as e:
+            logger.error(f"使用原生异步API保存消息到记忆失败: {e}", exc_info=True)
+
+    # 保留原有的_save_message_to_memory_async方法以保持向后兼容
+    async def _save_message_to_memory_async(self, conversation_id: str, message: dict):
+        """异步保存消息到记忆，不阻塞主线程 - 为保持向后兼容性保留"""
+        try:
+            # 直接调用新的异步方法
+            await self._async_save_message_to_memory(conversation_id, [message])
+        except Exception as e:
+            logger.error(f"异步保存消息到记忆失败: {e}")
+
 
 # 创建全局聊天引擎实例
 chat_engine = ChatEngine()
