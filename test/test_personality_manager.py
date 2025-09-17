@@ -27,8 +27,7 @@ def temp_personality_dir(tmp_path):
     temp_dir.mkdir()
     return str(temp_dir)
 
-@pytest.mark.asyncio
-async def test_personality_manager_initialization(temp_personality_dir, mock_config, mock_logger):
+def test_personality_manager_initialization(temp_personality_dir, mock_config, mock_logger):
     # 测试PersonalityManager的初始化
     with patch('os.path.exists', return_value=True):
         # 创建PersonalityManager实例
@@ -38,8 +37,7 @@ async def test_personality_manager_initialization(temp_personality_dir, mock_con
         assert personality_manager.personalities_dir == temp_personality_dir
         assert isinstance(personality_manager.personalities, dict)
 
-@pytest.mark.asyncio
-async def test_ensure_dir_exists(temp_personality_dir, mock_config, mock_logger):
+def test_ensure_dir_exists(temp_personality_dir, mock_config, mock_logger):
     # 测试确保目录存在的功能
     # 创建一个不存在的目录路径
     non_existent_dir = os.path.join(temp_personality_dir, "non_existent")
@@ -52,8 +50,7 @@ async def test_ensure_dir_exists(temp_personality_dir, mock_config, mock_logger)
             # 验证os.makedirs被调用
             mock_makedirs.assert_called_once_with(non_existent_dir)
 
-@pytest.mark.asyncio
-async def test_load_personalities(temp_personality_dir, mock_config, mock_logger):
+def test_load_personalities(temp_personality_dir, mock_config, mock_logger):
     # 测试加载人格文件
     # 创建测试人格文件
     personality_data = {
@@ -61,7 +58,8 @@ async def test_load_personalities(temp_personality_dir, mock_config, mock_logger
         "name": "测试人格",
         "system_prompt": "这是一个测试人格",
         "traits": ["测试", "示例"],
-        "examples": ["用户: 你是谁？\n助手: 我是一个测试人格。"]
+        "examples": ["用户: 你是谁？\n助手: 我是一个测试人格。"],
+        "allowed_tools": []
     }
     
     personality_file = os.path.join(temp_personality_dir, "test_personality.json")
@@ -78,8 +76,7 @@ async def test_load_personalities(temp_personality_dir, mock_config, mock_logger
     assert loaded_personality.name == "测试人格"
     assert loaded_personality.system_prompt == "这是一个测试人格"
 
-@pytest.mark.asyncio
-async def test_load_default_personalities(temp_personality_dir, mock_config, mock_logger):
+def test_load_default_personalities(temp_personality_dir, mock_config, mock_logger):
     # 测试加载默认人格
     # 模拟os.listdir返回空列表，表示没有人格文件
     with patch('os.listdir', return_value=[]):
@@ -93,8 +90,7 @@ async def test_load_default_personalities(temp_personality_dir, mock_config, moc
             # 验证保存了默认人格
             assert mock_save.call_count == 2
 
-@pytest.mark.asyncio
-async def test_add_personality(temp_personality_dir, mock_config, mock_logger):
+def test_add_personality(temp_personality_dir, mock_config, mock_logger):
     # 测试添加人格
     personality_manager = PersonalityManager(personalities_dir=temp_personality_dir)
     
@@ -104,7 +100,8 @@ async def test_add_personality(temp_personality_dir, mock_config, mock_logger):
         name="新人格",
         system_prompt="这是一个新人格",
         traits=["新", "创新"],
-        examples=["用户: 你好\n助手: 你好！我是新人格。"]
+        examples=["用户: 你好\n助手: 你好！我是新人格。"],
+        allowed_tools=[]
     )
     
     # 添加人格
@@ -114,8 +111,7 @@ async def test_add_personality(temp_personality_dir, mock_config, mock_logger):
     assert "new_personality" in personality_manager.personalities
     assert personality_manager.personalities["new_personality"] == new_personality
 
-@pytest.mark.asyncio
-async def test_get_personality(temp_personality_dir, mock_config, mock_logger):
+def test_get_personality(temp_personality_dir, mock_config, mock_logger):
     # 测试获取人格
     personality_manager = PersonalityManager(personalities_dir=temp_personality_dir)
     
@@ -125,7 +121,8 @@ async def test_get_personality(temp_personality_dir, mock_config, mock_logger):
         name="测试人格",
         system_prompt="这是一个测试人格",
         traits=["测试"],
-        examples=[]
+        examples=[],
+        allowed_tools=[]
     )
     
     # 添加人格
@@ -139,8 +136,7 @@ async def test_get_personality(temp_personality_dir, mock_config, mock_logger):
     non_existent_personality = personality_manager.get_personality("non_existent")
     assert non_existent_personality is None
 
-@pytest.mark.asyncio
-async def test_save_personality(temp_personality_dir, mock_config, mock_logger):
+def test_save_personality(temp_personality_dir, mock_config, mock_logger):
     # 测试保存人格
     personality_manager = PersonalityManager(personalities_dir=temp_personality_dir)
     
@@ -150,7 +146,8 @@ async def test_save_personality(temp_personality_dir, mock_config, mock_logger):
         name="保存测试人格",
         system_prompt="这是一个保存测试人格",
         traits=["保存", "测试"],
-        examples=[]
+        examples=[],
+        allowed_tools=[]
     )
     
     # 保存人格
@@ -166,8 +163,7 @@ async def test_save_personality(temp_personality_dir, mock_config, mock_logger):
         assert saved_data["id"] == "save_test"
         assert saved_data["name"] == "保存测试人格"
 
-@pytest.mark.asyncio
-async def test_list_personalities(temp_personality_dir, mock_config, mock_logger):
+def test_list_personalities(temp_personality_dir, mock_config, mock_logger):
     # 测试列出人格
     personality_manager = PersonalityManager(personalities_dir=temp_personality_dir)
     
@@ -180,7 +176,8 @@ async def test_list_personalities(temp_personality_dir, mock_config, mock_logger
         name="人格1",
         system_prompt="这是人格1",
         traits=[],
-        examples=[]
+        examples=[],
+        allowed_tools=[]
     )
     
     personality2 = Personality(
@@ -188,7 +185,8 @@ async def test_list_personalities(temp_personality_dir, mock_config, mock_logger
         name="人格2",
         system_prompt="这是人格2",
         traits=[],
-        examples=[]
+        examples=[],
+        allowed_tools=[]
     )
     
     # 添加人格
@@ -204,8 +202,7 @@ async def test_list_personalities(temp_personality_dir, mock_config, mock_logger
     assert {"id": "person1", "name": "人格1"} in personalities_list
     assert {"id": "person2", "name": "人格2"} in personalities_list
 
-@pytest.mark.asyncio
-async def test_apply_personality(temp_personality_dir, mock_config, mock_logger):
+def test_apply_personality(temp_personality_dir, mock_config, mock_logger):
     # 测试应用人格到消息列表
     personality_manager = PersonalityManager(personalities_dir=temp_personality_dir)
     
@@ -215,7 +212,8 @@ async def test_apply_personality(temp_personality_dir, mock_config, mock_logger)
         name="应用测试人格",
         system_prompt="这是应用测试的系统提示词",
         traits=[],
-        examples=[]
+        examples=[],
+        allowed_tools=[]
     )
     
     # 添加人格
@@ -235,8 +233,43 @@ async def test_apply_personality(temp_personality_dir, mock_config, mock_logger)
     assert messages_with_personality[0]["content"] == "这是应用测试的系统提示词"
     assert messages_with_personality[1] == messages[0]
 
-@pytest.mark.asyncio
-async def test_apply_non_existent_personality(temp_personality_dir, mock_config, mock_logger):
+def test_apply_personality_with_tools(temp_personality_dir, mock_config, mock_logger):
+    # 测试应用带有工具规则的人格
+    personality_manager = PersonalityManager(personalities_dir=temp_personality_dir)
+    
+    # 创建一个带有工具规则的人格
+    test_personality = Personality(
+        id="apply_with_tools",
+        name="带工具规则的人格",
+        system_prompt="这是带工具规则的系统提示词",
+        traits=[],
+        examples=[],
+        allowed_tools=[
+            {"description": "当用户询问天气时，可以使用天气工具"},
+            {"description": "当用户需要计算时，可以使用计算器工具"}
+        ]
+    )
+    
+    # 添加人格
+    personality_manager.add_personality(test_personality)
+    
+    # 创建消息列表
+    messages = [
+        {"role": "user", "content": "今天天气怎么样？"}
+    ]
+    
+    # 应用人格
+    messages_with_personality = personality_manager.apply_personality(messages, "apply_with_tools")
+    
+    # 验证结果
+    assert len(messages_with_personality) == 2
+    assert messages_with_personality[0]["role"] == "system"
+    assert "这是带工具规则的系统提示词" in messages_with_personality[0]["content"]
+    assert "工具使用规则" in messages_with_personality[0]["content"]
+    assert "当用户询问天气时，可以使用天气工具" in messages_with_personality[0]["content"]
+    assert messages_with_personality[1] == messages[0]
+
+def test_apply_non_existent_personality(temp_personality_dir, mock_config, mock_logger):
     # 测试应用不存在的人格
     personality_manager = PersonalityManager(personalities_dir=temp_personality_dir)
     
@@ -251,8 +284,7 @@ async def test_apply_non_existent_personality(temp_personality_dir, mock_config,
     # 验证警告日志
     mock_logger.warning.assert_called_once_with("Personality non_existent not found, using default")
 
-@pytest.mark.asyncio
-async def test_load_personality_invalid_json(temp_personality_dir, mock_config, mock_logger):
+def test_load_personality_invalid_json(temp_personality_dir, mock_config, mock_logger):
     # 测试加载无效的JSON文件
     # 创建一个无效的JSON文件
     invalid_file = os.path.join(temp_personality_dir, "invalid.json")
@@ -266,8 +298,7 @@ async def test_load_personality_invalid_json(temp_personality_dir, mock_config, 
     mock_logger.error.assert_called_once()
     assert "Failed to load personality from" in mock_logger.error.call_args[0][0]
 
-@pytest.mark.asyncio
-async def test_load_personality_validation_error(temp_personality_dir, mock_config, mock_logger):
+def test_load_personality_validation_error(temp_personality_dir, mock_config, mock_logger):
     # 测试加载验证失败的人格文件
     # 创建一个缺少必要字段的JSON文件
     invalid_data = {
