@@ -12,6 +12,7 @@ class Personality(BaseModel):
     system_prompt: str = Field(..., description="系统提示词")
     traits: List[str] = Field(default_factory=list, description="人格特质")
     examples: List[str] = Field(default_factory=list, description="对话示例")
+    allowed_tools: List[Dict[str, str]] = Field(default_factory=list, description="允许使用的工具及使用条件")
 
 class PersonalityManager:
     def __init__(self, personalities_dir: str = "./personalities"):
@@ -96,7 +97,16 @@ class PersonalityManager:
             logger.warning(f"Personality {personality_id} not found, using default")
             return messages
         
+        # 构建包含工具使用规则的系统提示词
+        system_content = personality.system_prompt
+        
+        if personality.allowed_tools:
+            tool_rules = "\n\n工具使用规则：\n"
+            for tool in personality.allowed_tools:
+                tool_rules += f"- {tool['description']}\n"
+            system_content += tool_rules
+        
         # 在消息列表最前面添加系统提示词
-        result = [{"role": "system", "content": personality.system_prompt}]
+        result = [{"role": "system", "content": system_content}]
         result.extend(messages)
         return result

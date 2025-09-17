@@ -19,3 +19,13 @@ class MCPServerError(MCPServiceError):
 class MCPClientError(MCPServiceError):
     """MCP客户端错误"""
     pass
+
+
+class MCPServerNotFoundError(MCPServiceError):
+    """MCP服务器未找到异常"""
+    pass
+
+
+class MCPToolNotFoundError(MCPServiceError):
+    """MCP工具未找到异常"""
+    pass

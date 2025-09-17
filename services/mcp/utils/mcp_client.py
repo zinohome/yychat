@@ -9,13 +9,11 @@ from typing import Any
 from urllib.parse import urljoin, urlparse
 
 import httpx
-from dify_plugin.config.logger_format import plugin_logger_handler
 from httpx_sse import connect_sse, EventSource
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
-logger.addHandler(plugin_logger_handler)
 
 
 class McpClient(ABC):
@@ -473,6 +471,9 @@ class McpClients:
                     name = tool["name"]
                     if name in self._tool_actions:
                         name = f"{server_name}__{name}"
+                        # 创建工具副本并更新名称
+                        tool = tool.copy()
+                        tool["name"] = name
                     self._tool_actions[name] = ToolAction(
                         tool_name=name,
                         server_name=server_name,
@@ -480,7 +481,6 @@ class McpClients:
                         action_feature=tool,
                     )
                     all_tools.append(tool)
-
                 # resources and resources templates list
                 if self._resources_as_tools:
                     resources = client.list_resources()

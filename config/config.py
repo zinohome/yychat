@@ -20,12 +20,7 @@ class Config:
     
     # 日志配置
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
-    
-    # MCP服务配置
-    MCP_SERVICE_URL = os.getenv("MCP_SERVICE_URL")
-    MCP_API_KEY = os.getenv("MCP_API_KEY")
-    MCP_CACHE_TTL = int(os.getenv("MCP_CACHE_TTL", "300"))
-    
+ 
     # 服务器配置
     SERVER_HOST = os.getenv("SERVER_HOST", "0.0.0.0")
     SERVER_PORT = int(os.getenv("SERVER_PORT", "8000"))

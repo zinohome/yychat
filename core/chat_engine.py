@@ -9,11 +9,15 @@ from config.log_config import get_logger
 from core.chat_memory import ChatMemory
 from core.personality_manager import PersonalityManager
 from services.tools.manager import ToolManager
-from services.mcp.client import mcp_client, MCPRequest
 import httpx
 from services.tools.registry import tool_registry
 from services.mcp.manager import mcp_manager
 from services.mcp.exceptions import MCPServiceError
+from openai.types.chat.chat_completion_message_tool_call import ChatCompletionMessageToolCall
+from openai.types.chat.chat_completion_message_function_tool_call import Function
+from openai.types.chat.chat_completion_message_function_tool_call import ChatCompletionMessageFunctionToolCall
+
+
 
 logger = get_logger(__name__)
 config = get_config()
@@ -61,11 +65,19 @@ class ChatEngine:
                         # 避免修改原始messages列表
                         messages_copy = [{"role": "system", "content": f"参考记忆：\n{memories_str}"}] + messages_copy
             
+            # 初始化allowed_tool_names为None
+            allowed_tool_names = None
+            
             # 应用人格 - 修复参数顺序
             if personality_id:
                 try:
                     messages_copy = self.personality_manager.apply_personality(messages_copy, personality_id)
                     logger.debug(f"应用人格后消息: {messages_copy}")
+                    
+                    # 获取人格的allowed_tools信息，用于工具过滤
+                    personality = self.personality_manager.get_personality(personality_id)
+                    if personality and personality.allowed_tools:
+                        allowed_tool_names = [tool["tool_name"] for tool in personality.allowed_tools]
                 except Exception as e:
                     logger.warning(f"应用人格时出错，忽略人格设置: {e}")
             
@@ -78,25 +90,47 @@ class ChatEngine:
             
             # 如果启用了工具，添加工具schema到请求参数
             if use_tools:
-                tools_schema = tool_registry.get_functions_schema()
+                # 获取所有注册的工具schema
+                all_tools_schema = tool_registry.get_functions_schema()
+                logger.debug(f"原始工具数量: {len(all_tools_schema)}")
+                logger.debug(f"允许的工具名称: {allowed_tool_names}")
+                
+                # 如果有allowed_tools配置，则进行过滤
+                if allowed_tool_names:
+                    # 只保留allowed_tools中列出的工具
+                    tools_schema = []
+                    for tool in all_tools_schema:
+                        # 检查工具名称结构，可能需要调整获取方式
+                        #logger.debug(f"工具原始定义: {tool}")
+                        tool_name = tool.get("function", {}).get("name")
+                        #logger.debug(f"检查工具: {tool_name}")
+                        if tool_name in allowed_tool_names:
+                            tools_schema.append(tool)
+                            #logger.debug(f"保留工具: {tool_name}")
+                    logger.info(f"已根据人格配置过滤工具，剩余工具数量: {len(tools_schema)}")
+                else:
+                    # 如果没有allowed_tools配置，则使用所有工具
+                    tools_schema = all_tools_schema
+                    logger.info(f"未设置人格工具过滤，使用所有工具，工具数量: {len(tools_schema)}")
                 if tools_schema:
                     request_params["tools"] = tools_schema
-                    logger.info(f"已添加工具schema到请求参数，工具数量: {len(tools_schema)}")
-                    logger.debug(f"工具schema: {tools_schema}")
                     
                     # 对于时间相关问题，强制使用工具
                     last_message = messages_copy[-1]["content"].lower() if messages_copy else ""
                     if any(keyword in last_message for keyword in ["几点", "时间", "现在", "几点钟", "时刻"]):
-                        request_params["tool_choice"] = {"type": "function", "function": {"name": "gettime"}}
-                        logger.info("检测到时间相关问题，强制使用gettime工具")
+                        # 只有当gettime工具在allowed_tools中时才强制使用
+                        if not allowed_tool_names or "gettime" in allowed_tool_names:
+                            request_params["tool_choice"] = {"type": "function", "function": {"name": "gettime"}}
+                            logger.info("检测到时间相关问题，强制使用gettime工具")
+                        else:
+                            logger.info("检测到时间相关问题，但gettime工具不在允许使用的工具列表中")
                 else:
-                    logger.warning("未找到注册的工具，无法添加工具schema到请求参数")
+                    logger.warning("未找到允许使用的工具，无法添加工具schema到请求参数")
             else:
                 logger.debug("工具调用已禁用")
             
             logger.debug(f"最终请求参数: {request_params}")
-            
-            # 根据是否使用工具来决定调用哪个生成方法
+
             if stream:
                 # 直接返回异步生成器方法调用
                 return self._generate_streaming_response(request_params, conversation_id, messages)
@@ -189,30 +223,95 @@ class ChatEngine:
             request_params["stream"] = True
             response = self.client.chat.completions.create(**request_params)
             
+            # 用于检测是否有工具调用
+            tool_calls = None
             full_content = ""
+            
+            # 流式处理响应
             for chunk in response:
-                if chunk.choices[0].delta.content is not None:
-                    content = chunk.choices[0].delta.content
-                    full_content += content
+                if chunk.choices and len(chunk.choices) > 0:
+                    choice = chunk.choices[0]
+                    
+                    # 检测工具调用
+                    if hasattr(choice.delta, 'tool_calls') and choice.delta.tool_calls:
+                        if not tool_calls:
+                            tool_calls = []
+                        # 收集工具调用信息
+                        for tool_call in choice.delta.tool_calls:
+                            # 初始化或更新工具调用信息
+                            if tool_call.index >= len(tool_calls):
+                                tool_calls.append({"id": tool_call.id, "type": "function", "function": {}})
+                            
+                            # 更新函数名称和参数
+                            if hasattr(tool_call.function, 'name') and tool_call.function.name:
+                                tool_calls[tool_call.index]["function"]["name"] = tool_call.function.name
+                            if hasattr(tool_call.function, 'arguments') and tool_call.function.arguments:
+                                if "arguments" not in tool_calls[tool_call.index]["function"]:
+                                    tool_calls[tool_call.index]["function"]["arguments"] = ""
+                                tool_calls[tool_call.index]["function"]["arguments"] += tool_call.function.arguments
+                    
+                    # 处理普通内容
+                    elif choice.delta.content is not None:
+                        content = choice.delta.content
+                        full_content += content
+                        yield {
+                            "role": "assistant",
+                            "content": content,
+                            "finish_reason": None,
+                            "stream": True
+                        }
+            
+            # 检查是否有工具调用需要处理
+            if tool_calls:
+                # 转换工具调用格式为OpenAI标准格式
+                 
+                formatted_tool_calls = []
+                for tool_call in tool_calls:
+                    # 使用正确的Function类
+                    function = Function(
+                        name=tool_call["function"]["name"],
+                        arguments=tool_call["function"]["arguments"]
+                    )
+                    
+                    # 由于ChatCompletionMessageToolCall是一个类型别名，我们需要直接创建正确的对象
+                    # 这里我们创建ChatCompletionMessageFunctionToolCall类型的对象   
+                                     
+                    formatted_tool_call = ChatCompletionMessageFunctionToolCall(
+                        id=tool_call["id"],
+                        type="function",
+                        function=function
+                    )
+                    formatted_tool_calls.append(formatted_tool_call)
+                
+                # 处理工具调用并获取结果
+                tool_response = await self._handle_tool_calls(
+                    formatted_tool_calls,
+                    conversation_id,
+                    original_messages
+                )
+                
+                # 由于_tool_calls返回的是非流式响应，我们需要模拟流式输出
+                if tool_response and "content" in tool_response:
+                    # 这里可以根据需要将内容分块输出
                     yield {
                         "role": "assistant",
-                        "content": content,
-                        "finish_reason": None,
+                        "content": tool_response["content"],
+                        "finish_reason": "stop",
                         "stream": True
                     }
-            
-            # 保存到记忆
-            if conversation_id and full_content:
-                self.chat_memory.add_message(conversation_id, {"role": "assistant", "content": full_content})
-                self.chat_memory.add_message(conversation_id, original_messages[-1])
-            
-            # 发送结束标志
-            yield {
-                "role": "assistant",
-                "content": "",
-                "finish_reason": "stop",
-                "stream": True
-            }
+            else:
+                # 保存到记忆
+                if conversation_id and full_content:
+                    self.chat_memory.add_message(conversation_id, {"role": "assistant", "content": full_content})
+                    self.chat_memory.add_message(conversation_id, original_messages[-1])
+                
+                # 发送结束标志
+                yield {
+                    "role": "assistant",
+                    "content": "",
+                    "finish_reason": "stop",
+                    "stream": True
+                }
             
         except Exception as e:
             logger.error(f"Error generating streaming response: {e}")
@@ -264,26 +363,50 @@ class ChatEngine:
         # 重新生成响应
         return await self.generate_response(new_messages, conversation_id, use_tools=False)
     
-    async def call_mcp_service(self, service_name: str, method_name: str, params: dict):
+    async def call_mcp_service(self, tool_name: str = None, params: dict = None, 
+                         service_name: str = None, method_name: str = None, 
+                         mcp_server: str = None):
         """调用MCP服务"""
         try:
-            # 构建工具名称和参数
-            tool_name = f"{service_name}__{method_name}"
-            logger.info(f"Calling MCP service: {tool_name}, params: {params}")
+            # 参数验证
+            params = params or {}
             
-            # 使用MCP管理器调用服务
-            result = mcp_manager.call_tool(tool_name, params)
+            # 确定工具名称
+            if not tool_name:
+                if not service_name or not method_name:
+                    raise ValueError("Either 'tool_name' or both 'service_name' and 'method_name' must be provided")
+                tool_name = f"{service_name}__{method_name}"
             
-            # 处理结果
-            if result and len(result) > 0:
-                return result[0].get('text') or str(result)
-            return str(result)
+            logger.info(f"Calling MCP service: {tool_name}, params: {params}, server: {mcp_server or 'auto'}")
+            
+            # 使用MCP管理器调用服务，支持指定服务器
+            result = mcp_manager.call_tool(tool_name, params, mcp_server)
+            
+            # 更灵活的结果处理
+            processed_result = []
+            if isinstance(result, list):
+                for item in result:
+                    if isinstance(item, dict) and 'text' in item:
+                        processed_result.append(item['text'])
+                    else:
+                        processed_result.append(str(item))
+                response_text = "\n".join(processed_result) if processed_result else str(result)
+            else:
+                response_text = str(result)
+            
+            return {"success": True, "result": response_text, "raw_result": result}
+        except MCPServerNotFoundError as e:
+            logger.error(f"MCP server error: {str(e)}")
+            return {"success": False, "error": f"MCP服务器错误: {str(e)}"}
+        except MCPToolNotFoundError as e:
+            logger.error(f"MCP tool error: {str(e)}")
+            return {"success": False, "error": f"MCP工具错误: {str(e)}"}
         except MCPServiceError as e:
             logger.error(f"MCP service error: {str(e)}")
-            return f"MCP服务调用失败: {str(e)}"
+            return {"success": False, "error": f"MCP服务调用失败: {str(e)}"}
         except Exception as e:
             logger.error(f"Unexpected error when calling MCP service: {str(e)}")
-            return f"调用MCP服务时发生未知错误: {str(e)}"
+            return {"success": False, "error": f"调用MCP服务时发生未知错误: {str(e)}"}
 
     # 清除会话记忆
     def clear_conversation_memory(self, conversation_id: str):
