@@ -61,7 +61,7 @@ class McpClient(ABC):
                 return []
             raise Exception(f"{self.name} - MCP Server tools/list error: {error}")
         tools = response.get("result", {}).get("tools", [])
-        logger.info(f"{self.name} - MCP Server tools/list: {tools}")
+        logger.debug(f"{self.name} - MCP Server tools/list: {tools}")
         return tools
 
     def call_tool(self, name: str, arguments: dict) -> list[dict]:
@@ -79,7 +79,7 @@ class McpClient(ABC):
             error = response["error"]
             raise Exception(f"{self.name} - MCP Server tools/call error: {error}")
         content = response.get("result", {}).get("content", [])
-        logger.info(f"{self.name} - MCP Server tools/call: {content}")
+        logger.debug(f"{self.name} - MCP Server tools/call: {content}")
         return content
 
     def list_resources(self) -> list[dict]:
@@ -98,7 +98,7 @@ class McpClient(ABC):
                 return []
             raise Exception(f"{self.name} - MCP Server resources/list error: {error}")
         resources = response.get("result", {}).get("resources", [])
-        logger.info(f"{self.name} - MCP Server resources/list: {resources}")
+        logger.debug(f"{self.name} - MCP Server resources/list: {resources}")
         return resources
 
     def read_resource(self, uri: str) -> list[dict]:
@@ -115,7 +115,7 @@ class McpClient(ABC):
             error = response["error"]
             raise Exception(f"{self.name} - MCP Server resources/read error: {error}")
         contents = response.get("result", {}).get("contents", [])
-        logger.info(f"{self.name} - MCP Server resources/read: {contents}")
+        logger.debug(f"{self.name} - MCP Server resources/read: {contents}")
         return contents
 
     def list_resources_templates(self) -> list[dict]:
@@ -133,7 +133,7 @@ class McpClient(ABC):
                 return []
             raise Exception(f"{self.name} - MCP Server resources/templates/list error: {error}")
         resources = response.get("result", {}).get("resourceTemplates", [])
-        logger.info(f"{self.name} - MCP Server resources/templates/list: {resources}")
+        logger.debug(f"{self.name} - MCP Server resources/templates/list: {resources}")
         return resources
 
     def list_prompts(self) -> list[dict]:
@@ -152,7 +152,7 @@ class McpClient(ABC):
                 return []
             raise Exception(f"{self.name} - MCP Server prompts/list error: {error}")
         prompts = response.get("result", {}).get("prompts", [])
-        logger.info(f"{self.name} - MCP Server prompts/list: {prompts}")
+        logger.debug(f"{self.name} - MCP Server prompts/list: {prompts}")
         return prompts
 
     def get_prompt(self, name: str, arguments: dict) -> list[dict]:
@@ -170,7 +170,7 @@ class McpClient(ABC):
             error = response["error"]
             raise Exception(f"{self.name} - MCP Server prompts/get error: {error}")
         messages = response.get("result", {}).get("messages", [])
-        logger.info(f"{self.name} - MCP Server prompts/get: {messages}")
+        logger.debug(f"{self.name} - MCP Server prompts/get: {messages}")
         return messages
 
 
@@ -203,7 +203,7 @@ class McpSseClient(McpClient):
 
     def _listen_messages(self) -> None:
         try:
-            logger.info(f"{self.name} - Connecting to SSE endpoint: {self.remove_request_params(self.url)}")
+            logger.debug(f"{self.name} - Connecting to SSE endpoint: {self.remove_request_params(self.url)}")
             with connect_sse(
                     client=self.client,
                     method="GET",
@@ -221,7 +221,7 @@ class McpSseClient(McpClient):
                         case "endpoint":
                             # self.endpoint_url = urljoin(self.url, sse.data)
                             self.endpoint_url = urljoin(self.url.rstrip("/"), sse.data.lstrip("/"))
-                            logger.info(f"{self.name} - Received endpoint URL: {self.endpoint_url}")
+                            logger.debug(f"{self.name} - Received endpoint URL: {self.endpoint_url}")
                             self._connected.set()
                             url_parsed = urlparse(self.url)
                             endpoint_parsed = urlparse(self.endpoint_url)
@@ -257,7 +257,7 @@ class McpSseClient(McpClient):
             follow_redirects=True,
         )
         response.raise_for_status()
-        logger.info(f"response status: {response.status_code} {response.reason_phrase}")
+        logger.debug(f"response status: {response.status_code} {response.reason_phrase}")
         if not response.is_success:
             raise ValueError(
                 f"{self.name} - MCP Server response: {response.status_code} {response.reason_phrase} ({response.content})")
@@ -267,9 +267,9 @@ class McpSseClient(McpClient):
                 self.response_ready.wait()
                 self.response_ready.clear()
                 if message_id in self.message_dict:
-                    logger.info(f"message_id: {message_id}")
+                    logger.debug(f"message_id: {message_id}")
                     message = self.message_dict.pop(message_id, None)
-                    logger.info(f"message: {message}")
+                    logger.debug(f"message: {message}")
                     if message and message.get("method") == "ping":
                         continue
                     return message
@@ -357,14 +357,14 @@ class McpStreamableHttpClient(McpClient):
             timeout=httpx.Timeout(self.timeout),
             follow_redirects=True,
         )
-        logger.info(f"response status: {response.status_code} {response.reason_phrase}")
+        logger.debug(f"response status: {response.status_code} {response.reason_phrase}")
         if not response.is_success:
             raise ValueError(
                 f"{self.name} - MCP Server response: {response.status_code} {response.reason_phrase} ({response.content})")
-        logger.info(f"response headers: {response.headers}")
+        logger.debug(f"response headers: {response.headers}")
         if "mcp-session-id" in response.headers:
             self.session_id = response.headers.get("mcp-session-id")
-        logger.info(f"response content: {response.content}")
+        logger.debug(f"response content: {response.content}")
         if not response.content:
             return {}
         message = {}
@@ -378,7 +378,7 @@ class McpStreamableHttpClient(McpClient):
             message = (response.json() if response.content else None) or {}
         else:
             raise Exception(f"{self.name} - Unsupported Content-Type: {content_type}")
-        logger.info(f"message: {message}")
+        logger.debug(f"message: {message}")
         return message
 
     def initialize(self):
@@ -485,7 +485,7 @@ class McpClients:
                 
                 # 其余代码保持不变...
             
-            logger.info(f"Fetching tools: {all_tools}")
+            logger.debug(f"Fetching tools: {all_tools}")
             return all_tools
         except Exception as e:
             raise Exception(f"Error fetching tools: {str(e)}")
@@ -497,7 +497,7 @@ class McpClients:
             raise Exception(f"There is not a tool named {tool_name!r}")
         tool_action = self._tool_actions[tool_name]
         server_name = tool_action.server_name
-        logger.info(f"Executing tool! server name: {server_name}, tool name: {tool_name}, tool arguments: {tool_args}")
+        logger.debug(f"Executing tool! server name: {server_name}, tool name: {tool_name}, tool arguments: {tool_args}")
         if server_name not in self._clients:
             raise Exception(f"There is not a MCP Server named {server_name!r}")
         client = self._clients[server_name]
@@ -549,7 +549,7 @@ class McpClients:
                 })
             else:
                 raise Exception(f"Unsupported Action type: {action_type}")
-            logger.info(f"Executing tool: {tool_contents}")
+            logger.debug(f"Executing tool: {tool_contents}")
             return tool_contents
         except Exception as e:
             raise Exception(f"Error executing tool: {str(e)}")

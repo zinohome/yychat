@@ -17,10 +17,10 @@ class ChatMemory:
             # 正确创建MemoryConfig对象来配置Memory，使用path而不是persist_directory
             memory_config = MemoryConfig(
                 llm={
-                    "provider": "openai",
+                    "provider": config.MEM0_LLM_PROVIDER,
                     "config": {
-                        "model": config.OPENAI_MODEL,
-                        "max_tokens": config.OPENAI_MAX_TOKENS
+                        "model": config.MEM0_LLM_CONFIG_MODEL, 
+                        "max_tokens": config.MEM0_LLM_CONFIG_MAX_TOKENS
                     }
                 },
                 vector_store={
@@ -139,10 +139,10 @@ def get_memory_config():
     config = get_config()
     return MemoryConfig(
         llm={
-            "provider": "openai",
+            "provider": config.MEM0_LLM_PROVIDER,
             "config": {
-                "model": config.OPENAI_MODEL,
-                "max_tokens": config.OPENAI_MAX_TOKENS
+                "model": config.MEM0_LLM_CONFIG_MODEL,
+                "max_tokens": config.MEM0_LLM_CONFIG_MAX_TOKENS
             }
         },
         vector_store={

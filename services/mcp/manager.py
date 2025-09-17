@@ -45,7 +45,7 @@ class MCPManager:
                 if servers_config_json:
                     try:
                         servers_config = json.loads(servers_config_json)
-                        logger.info(f"Loading MCP servers config from environment variable: {servers_config}")
+                        logger.debug(f"Loading MCP servers config from environment variable: {servers_config}")
                         self._clients = McpClients(servers_config)
                     except json.JSONDecodeError as e:
                         logger.error(f"Failed to parse MCP servers config JSON from environment variable: {str(e)}")
@@ -74,7 +74,7 @@ class MCPManager:
         if not self._clients:
             raise MCPServiceError("MCP clients not initialized")
         try:
-            logger.info(f"Calling MCP tool: {tool_name}, arguments: {arguments}, server: {mcp_server or 'auto'}")
+            logger.debug(f"Calling MCP tool: {tool_name}, arguments: {arguments}, server: {mcp_server or 'auto'}")
             
             # 如果指定了服务器，优先尝试在该服务器上调用
             if mcp_server:

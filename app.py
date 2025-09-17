@@ -52,7 +52,7 @@ async def startup_event():
     """应用启动时执行的初始化操作"""
     # 自动发现并注册所有工具
     registered_count = ToolDiscoverer.register_discovered_tools()
-    logger.info(f"自动注册了 {registered_count} 个工具")
+    logger.debug(f"自动注册了 {registered_count} 个工具")
     
     # 初始化并注册MCP工具
     try:
@@ -81,7 +81,7 @@ async def create_chat_completion(request: ChatCompletionRequest):
         conversation_id = request.conversation_id or request.user
         
         # 记录请求日志
-        logger.info(f"Chat completion request: model={request.model}, conversation_id={conversation_id}")
+        logger.debug(f"Chat completion request: model={request.model}, conversation_id={conversation_id}")
         
         if request.stream:
             # 流式响应处理
@@ -321,7 +321,7 @@ async def call_tool(request: ToolCallRequest):
             raise HTTPException(status_code=400, detail={"error": {"message": "Missing tool_name", "type": "validation_error"}})
         
         # 调用工具
-        logger.info(f"Calling tool: {tool_name} with params: {params}")
+        logger.debug(f"Calling tool: {tool_name} with params: {params}")
         result = await tool_manager.execute_tool(tool_name, params)
         
         # 格式化返回结果

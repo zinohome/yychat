@@ -13,9 +13,9 @@ class ToolManager:
         
         try:
             # 异步执行工具
-            logger.info(f"Executing tool: {tool_name} with params: {params}")
+            logger.debug(f"Executing tool: {tool_name} with params: {params}")
             result = await tool.execute(params)
-            logger.info(f"Tool {tool_name} executed successfully. Result: {result}")
+            logger.debug(f"Tool {tool_name} executed successfully. Result: {result}")
             return {"success": True, "result": result}
         except Exception as e:
             logger.error(f"Error executing tool {tool_name}: {e}")

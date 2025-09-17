@@ -1,9 +1,9 @@
-from typing import Dict, Any
 from ..base import Tool
 from ..registry import tool_registry
 from tavily import TavilyClient
 import os
 from config.config import get_config
+from typing import Dict, Any  # 添加缺失的类型导入
 
 config = get_config()
 class TavilySearchTool(Tool):
@@ -61,7 +61,9 @@ class TavilySearchTool(Tool):
             tavily_client = TavilyClient(api_key=api_key)
             response = tavily_client.search(
                 query=query,
-                search_depth=search_depth
+                search_depth=search_depth,
+                topic="general",  # 默认添加topic参数
+                country="china"   # 默认添加country参数
             )
             
             # 组织返回结果

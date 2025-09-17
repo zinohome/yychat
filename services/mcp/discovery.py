@@ -61,6 +61,6 @@ def discover_and_register_mcp_tools():
                         return f"执行MCP工具失败: {str(e)}"
             # 注册工具类本身，而不是实例
             tool_registry.register(DynamicMCPTool)
-            logger.info(f"自动注册MCP tool: {tool_name}")
+            logger.debug(f"自动注册MCP tool: {tool_name}")
     except Exception as e:
         logger.error(f"Failed to discover and register MCP tools: {str(e)}")
