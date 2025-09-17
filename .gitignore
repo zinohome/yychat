@@ -27,3 +27,4 @@ data
 volumes
 config.yaml
 .DS_Store
+/chroma_db/
