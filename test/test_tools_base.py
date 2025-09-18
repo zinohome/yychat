@@ -1,4 +1,5 @@
 import pytest
+from abc import ABC, abstractmethod
 from services.tools.base import Tool
 from typing import Dict, Any
 
@@ -68,3 +69,6 @@ def test_abstract_method_enforcement():
             def name(self):
                 return "incomplete_tool"
             # 故意不实现其他抽象方法
+        
+        # 尝试实例化不完整的类
+        IncompleteTool()

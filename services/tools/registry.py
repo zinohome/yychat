@@ -1,4 +1,4 @@
-from typing import Dict, Type, Optional, List
+from typing import Dict, Optional, Type
 from .base import Tool
 
 class ToolRegistry:
@@ -6,6 +6,10 @@ class ToolRegistry:
         self._tools: Dict[str, Type[Tool]] = {}
     
     def register(self, tool_class: Type[Tool]):
+        # 检查是否是Tool的子类
+        if not issubclass(tool_class, Tool):
+            raise TypeError(f"Only Tool subclasses can be registered, got {tool_class.__name__}")
+        
         tool = tool_class()
         self._tools[tool.name] = tool_class
     

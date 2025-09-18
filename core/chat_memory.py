@@ -134,37 +134,18 @@ class ChatMemory:
             logger.error(f"Failed to add memory: {e}")
 
 # 添加异步版本的ChatMemory类
-def get_memory_config():
-    """获取统一的MemoryConfig配置"""
-    config = get_config()
-    return MemoryConfig(
-        llm={
-            "provider": config.MEM0_LLM_PROVIDER,
-            "config": {
-                "model": config.MEM0_LLM_CONFIG_MODEL,
-                "max_tokens": config.MEM0_LLM_CONFIG_MAX_TOKENS
-            }
-        },
-        vector_store={
-            "provider": "chroma",
-            "config": {
-                "collection_name": config.CHROMA_COLLECTION_NAME,
-                "path": config.CHROMA_PERSIST_DIRECTORY
-            }
-        }
-    )
-
 class AsyncChatMemory:
-    def __init__(self, async_memory=None):
-        # 在__init__方法内获取配置
-        config = get_config()
+    def __init__(self, async_memory=None, config=None):
+        # 如果提供了config参数，使用它；否则使用get_config()获取默认配置
+        self.config = config if config is not None else get_config()
         
         # 确保持久化目录存在
-        os.makedirs(config.CHROMA_PERSIST_DIRECTORY, exist_ok=True)
+        os.makedirs(self.config.CHROMA_PERSIST_DIRECTORY, exist_ok=True)
         
         # 如果没有提供async_memory对象，创建一个新的
         if async_memory is None:
-            memory_config = get_memory_config()
+            # 传递config参数给get_memory_config函数
+            memory_config = get_memory_config(self.config)
             
             logger.debug(f"初始化AsyncMemory，配置: {memory_config}")
             # 使用MemoryConfig对象初始化AsyncMemory
@@ -267,3 +248,25 @@ def get_async_chat_memory():
         # 否则创建新实例
         _async_chat_memory = AsyncChatMemory()
         return _async_chat_memory
+
+# 修改get_memory_config函数，接受可选的config参数
+def get_memory_config(config=None):
+    """获取统一的MemoryConfig配置"""
+    # 如果提供了config参数，使用它；否则使用get_config()获取默认配置
+    config = config if config is not None else get_config()
+    return MemoryConfig(
+        llm={
+            "provider": config.MEM0_LLM_PROVIDER,
+            "config": {
+                "model": config.MEM0_LLM_CONFIG_MODEL,
+                "max_tokens": config.MEM0_LLM_CONFIG_MAX_TOKENS
+            }
+        },
+        vector_store={
+            "provider": "chroma",
+            "config": {
+                "collection_name": config.CHROMA_COLLECTION_NAME,
+                "path": config.CHROMA_PERSIST_DIRECTORY
+            }
+        }
+    )

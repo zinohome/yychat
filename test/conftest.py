@@ -1,6 +1,7 @@
-import os
+
 import sys
 import pytest
+import os  # 添加os模块导入
 from unittest.mock import patch, MagicMock
 import tempfile
 import shutil
@@ -87,6 +88,36 @@ def test_client():
     with TestClient(app) as client:
         yield client
 
+# 添加mock_config fixture
+@pytest.fixture  # 修复格式问题，确保装饰器单独占一行
+def mock_config():
+    """模拟配置对象"""
+    config = MagicMock()
+    config.OPENAI_API_KEY = "test_key"
+    config.OPENAI_BASE_URL = "https://api.example.com"
+    config.OPENAI_MODEL = "gpt-4.1-turbo-2024-04-09"
+    config.OPENAI_TEMPERATURE = 0.7
+    config.OPENAI_MAX_TOKENS = 16384
+    config.ENABLE_TOOLS = True
+    config.ENABLE_MEMORY = True
+    yield config  # 添加yield语句返回模拟对象
+
+# 添加mock_async_memory fixture
+@pytest.fixture
+def mock_async_memory():
+    """模拟异步记忆存储"""
+    from unittest.mock import AsyncMock
+    # 创建AsyncMock对象，而不是异步生成器
+    mock_instance = AsyncMock()
+    # 配置需要的异步方法
+    mock_instance.add = AsyncMock(return_value=None)
+    mock_instance.add_batch = AsyncMock(return_value=None)
+    mock_instance.search = AsyncMock(return_value=[])
+    mock_instance.get_relevant = AsyncMock(return_value=[])
+    mock_instance.get_all = AsyncMock(return_value=[])
+    mock_instance.delete_all = AsyncMock(return_value=None)
+    
+    return mock_instance
 
 import warnings
 from pydantic.warnings import PydanticDeprecatedSince20

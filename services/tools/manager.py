@@ -1,5 +1,6 @@
-import asyncio
+
 from typing import Dict, Any, Optional
+import asyncio  # 添加asyncio模块导入
 from .registry import tool_registry
 from config import get_logger
 logger = get_logger(__name__)
@@ -42,6 +43,8 @@ class ToolManager:
                 })
             else:
                 processed_results.append(result)
-                processed_results[-1]["tool_name"] = tool_calls[i]["name"]
+                # 只有当result不是None时才添加tool_name
+                if result is not None:
+                    processed_results[-1]["tool_name"] = tool_calls[i]["name"]
         
         return processed_results

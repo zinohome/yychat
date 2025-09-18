@@ -1,15 +1,17 @@
 import pytest
 import os
+import importlib
+import inspect
 from unittest.mock import patch, MagicMock, mock_open
 from services.tools.discovery import ToolDiscoverer
 from services.tools.base import Tool
 from services.tools.registry import tool_registry
 
 # 测试ToolDiscoverer.discover_tools方法
-@patch('os.listdir')
-@patch('importlib.import_module')
-@patch('inspect.getmembers')
-@patch('os.path.abspath')
+@patch('services.tools.discovery.os.listdir')
+@patch('services.tools.discovery.importlib.import_module')
+@patch('services.tools.discovery.inspect.getmembers')
+@patch('services.tools.discovery.os.path.abspath')
 def test_tool_discoverer_discover_tools(mock_abspath, mock_getmembers, mock_import_module, mock_listdir):
     # 配置mock返回值
     mock_abspath.return_value = "/fake/path"
@@ -80,9 +82,9 @@ def test_tool_discoverer_discover_tools(mock_abspath, mock_getmembers, mock_impo
         mock_import_module.assert_any_call("services.tools.implementations.tool2")
 
 # 测试ToolDiscoverer.discover_tools方法 - 导入异常
-@patch('os.listdir')
-@patch('importlib.import_module')
-@patch('os.path.abspath')
+@patch('services.tools.discovery.os.listdir')
+@patch('services.tools.discovery.importlib.import_module')
+@patch('services.tools.discovery.os.path.abspath')
 def test_tool_discoverer_discover_tools_import_error(mock_abspath, mock_import_module, mock_listdir):
     # 配置mock返回值
     mock_abspath.return_value = "/fake/path"

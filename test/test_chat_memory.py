@@ -1,42 +1,53 @@
 import pytest
 import os
+import core  # 添加导入
 import json
 from unittest.mock import patch, MagicMock
 from core.chat_memory import ChatMemory, AsyncChatMemory, get_memory_config, get_async_chat_memory
 from mem0.configs.base import MemoryConfig
+from config.config import get_config  # 添加导入
 
 # 测试ChatMemory初始化
 def test_chat_memory_init(mock_config, mock_memory):
     # 测试使用提供的memory对象初始化
     chat_memory = ChatMemory(memory=mock_memory)
     assert chat_memory.memory == mock_memory
-    
+
     # 测试不提供memory对象的初始化
     with patch('core.chat_memory.Memory') as mock_memory_class:
         mock_memory_instance = MagicMock()
         mock_memory_class.return_value = mock_memory_instance
-        
+
         # 配置mock_config以包含llm相关配置
         mock_config.MEM0_LLM_PROVIDER = "openai"
         mock_config.MEM0_LLM_CONFIG_MODEL = "gpt-4.1"
         mock_config.MEM0_LLM_CONFIG_MAX_TOKENS = 32768
         mock_config.CHROMA_COLLECTION_NAME = "test_collection"
         mock_config.CHROMA_PERSIST_DIRECTORY = "/tmp/test_chroma"
-        
+
         # 使用makedirs的patch，避免实际创建目录
         with patch('os.makedirs') as mock_makedirs:
-            chat_memory = ChatMemory()
-            
-            # 验证MemoryConfig是否正确创建并使用
-            args, kwargs = mock_memory_class.call_args
-            assert isinstance(kwargs['config'], MemoryConfig)
-            assert kwargs['config'].llm['provider'] == "openai"
-            assert kwargs['config'].llm['config']['model'] == "gpt-4.1"
-            assert kwargs['config'].llm['config']['max_tokens'] == 32768
-            assert kwargs['config'].vector_store['provider'] == "chroma"
-            
-            # 验证makedirs被调用
-            mock_makedirs.assert_called_once_with("/tmp/test_chroma", exist_ok=True)
+            # 添加对get_config的patch，使其返回mock_config
+            with patch('core.chat_memory.get_config') as mock_get_config:
+                mock_get_config.return_value = mock_config
+                
+                chat_memory = ChatMemory()
+
+                # 验证MemoryConfig是否正确创建并使用
+                args, kwargs = mock_memory_class.call_args
+                assert isinstance(kwargs['config'], MemoryConfig)
+                # 使用点表示法访问LlmConfig对象的属性
+                assert kwargs['config'].llm.provider == "openai"
+                # llm.config是字典，使用字典下标访问
+                assert kwargs['config'].llm.config['model'] == "gpt-4.1"
+                assert kwargs['config'].llm.config['max_tokens'] == 32768
+                assert kwargs['config'].vector_store.provider == "chroma"
+                # vector_store.config是对象，使用点表示法访问
+                assert kwargs['config'].vector_store.config.collection_name == "test_collection"
+                assert kwargs['config'].vector_store.config.path == "/tmp/test_chroma"
+
+                # 验证makedirs是否被正确调用
+                mock_makedirs.assert_called_once_with("/tmp/test_chroma", exist_ok=True)
 
 # 测试get_memory_config函数
 def test_get_memory_config(mock_config):
@@ -47,17 +58,20 @@ def test_get_memory_config(mock_config):
     mock_config.CHROMA_COLLECTION_NAME = "test_collection"
     mock_config.CHROMA_PERSIST_DIRECTORY = "/tmp/test_chroma"
     
-    # 获取配置
-    config = get_memory_config()
+    # 获取配置 - 传递mock_config参数
+    config = get_memory_config(mock_config)
     
     # 验证配置
     assert isinstance(config, MemoryConfig)
-    assert config.llm['provider'] == "openai"
-    assert config.llm['config']['model'] == "gpt-4.1"
-    assert config.llm['config']['max_tokens'] == 32768
-    assert config.vector_store['provider'] == "chroma"
-    assert config.vector_store['config']['collection_name'] == "test_collection"
-    assert config.vector_store['config']['path'] == "/tmp/test_chroma"
+    # 根据实际对象结构使用正确的访问方式
+    assert config.llm.provider == "openai"
+    # config.llm.config 是字典，使用字典下标访问
+    assert config.llm.config['model'] == "gpt-4.1"
+    assert config.llm.config['max_tokens'] == 32768
+    assert config.vector_store.provider == "chroma"
+    # config.vector_store.config 是 ChromaDbConfig 对象，使用点表示法访问
+    assert config.vector_store.config.collection_name == "test_collection"
+    assert config.vector_store.config.path == "/tmp/test_chroma"
 
 # 测试add_message方法
 def test_add_message(mock_config, mock_memory):
@@ -279,7 +293,7 @@ async def test_async_chat_memory_init(mock_config, mock_async_memory):
         
         # 使用makedirs的patch
         with patch('os.makedirs') as mock_makedirs:
-            async_chat_memory = AsyncChatMemory()
+            async_chat_memory = AsyncChatMemory(config=mock_config)
             
             # 验证AsyncMemory是否正确创建
             mock_async_memory_class.assert_called_once()
