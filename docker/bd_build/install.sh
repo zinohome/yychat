@@ -2,6 +2,8 @@
 set -e
 set -x
 apt-get update && DEBIAN_FRONTEND=noninteractive && \
+apt-get install -y dirmngr gnupg apt-transport-https ca-certificates curl && \
+curl https://oss-binaries.phusionpassenger.com/auto-software-signing-gpg-key.txt | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/phusion.gpg >/dev/null  && \
 apt -y dist-upgrade && \
 apt install -y --no-install-recommends build-essential libssl-dev libffi-dev python3-dev net-tools libsasl2-dev curl wget procps git libnss3-tools python3-pip && \
 apt install -y software-properties-common  && add-apt-repository -y ppa:deadsnakes/ppa && apt install -y python3.11 && \
