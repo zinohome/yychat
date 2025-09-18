@@ -78,9 +78,19 @@ async def global_exception_handler(request: Request, exc: Exception):
 @app.post("/v1/chat/completions", response_model=ChatCompletionResponse)
 async def create_chat_completion(request: ChatCompletionRequest):
     try:
+        # 打印完整的request内容，用于调试conversation_id问题
+        logger.debug(f"完整的请求内容: {request.model_dump()}")
+        logger.debug(f"request.conversation_id: {request.conversation_id}, type: {type(request.conversation_id)}")
+        logger.debug(f"request.user: {request.user}, type: {type(request.user)}")
+        
         # 验证conversation_id，如果没有则使用user作为会话标识
         conversation_id = request.conversation_id or request.user
         
+        # 如果仍然没有有效的conversation_id，设置一个默认值
+        if not conversation_id:
+            conversation_id = "default_conversation"
+            logger.warning(f"未提供有效的conversation_id和user，使用默认值: {conversation_id}")
+            
         # 记录请求日志
         logger.debug(f"Chat completion request: model={request.model}, conversation_id={conversation_id}")
         

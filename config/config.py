@@ -34,6 +34,13 @@ class Config:
     # 服务器配置
     SERVER_HOST = os.getenv("SERVER_HOST", "0.0.0.0")
     SERVER_PORT = int(os.getenv("SERVER_PORT", "8000"))
+    
+    # 默认人格配置
+    DEFAULT_PERSONALITY = os.getenv("DEFAULT_PERSONALITY", "health_assistant")
+    
+    # 响应流和工具使用默认配置
+    STREAM_DEFAULT = os.getenv("STREAM_DEFAULT", "True").lower() == "true"
+    USE_TOOLS_DEFAULT = os.getenv("USE_TOOLS_DEFAULT", "True").lower() == "true"
 
 # 创建配置实例
 def get_config():

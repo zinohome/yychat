@@ -47,13 +47,31 @@ class ChatEngine:
         self.tool_manager = ToolManager()
     
     async def generate_response(self, messages: List[Dict[str, str]], conversation_id: str = "default", 
-                               personality_id: Optional[str] = None, use_tools: bool = True, 
-                               stream: bool = False) -> Any:
+                               personality_id: Optional[str] = None, use_tools: Optional[bool] = None, 
+                               stream: Optional[bool] = None) -> Any:
         try:
+            # 打印传入的参数值，用于调试
+            logger.debug(f"传入参数 - personality_id: {personality_id}, use_tools: {use_tools}, stream: {stream}, type(personality_id): {type(personality_id)}, type(use_tools): {type(use_tools)}, type(stream): {type(stream)}")
+            
             # 创建messages的深拷贝，避免修改原始列表
             messages_copy = [msg.copy() for msg in messages]
             
             logger.debug(f"原始消息: {messages_copy}")
+            
+            # 如果没有指定人格ID，使用默认人格
+            if personality_id is None:
+                personality_id = config.DEFAULT_PERSONALITY
+                logger.info(f"未指定人格ID，使用默认人格: {personality_id}")
+            
+            # 如果没有指定use_tools，使用默认值
+            if use_tools is None:
+                use_tools = config.USE_TOOLS_DEFAULT
+                logger.info(f"未指定use_tools，使用默认值: {use_tools}")
+            
+            # 如果没有指定stream，使用默认值
+            if stream is None:
+                stream = config.STREAM_DEFAULT
+                logger.info(f"未指定stream，使用默认值: {stream}")
             
             # 首先从记忆中检索相关内容 - 这里使用同步版本，因为会影响响应生成
             if conversation_id != "default" and messages_copy:

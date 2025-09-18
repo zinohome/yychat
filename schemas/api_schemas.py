@@ -17,7 +17,7 @@ class ChatCompletionRequest(BaseModel):
     user: Optional[str] = Field(default=None, description="用户标识")
     # 自定义字段
     conversation_id: Optional[str] = Field(default=None, description="会话ID")
-    personality_id: Optional[str] = Field(default="professional", description="人格ID")
+    personality_id: Optional[str] = Field(default=None, description="人格ID")
     use_tools: bool = Field(default=True, description="是否使用工具")
 
 # 聊天完成响应选择模型
