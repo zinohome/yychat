@@ -1,13 +1,13 @@
 #!/bin/bash
 set -e
 set -x
-apt clean && rm -rf /var/lib/apt/lists/* && apt update  && \
-apt-get update && DEBIAN_FRONTEND=noninteractive && \
-apt-get install -y dirmngr gnupg apt-transport-https ca-certificates curl && \
+apt clean && rm -rf /var/lib/apt/lists/* && \
+apt-get --allow-insecure-repositories update && DEBIAN_FRONTEND=noninteractive && \
+apt-get --allow-insecure-repositories install -y dirmngr gnupg apt-transport-https ca-certificates curl && \
 curl https://oss-binaries.phusionpassenger.com/auto-software-signing-gpg-key.txt | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/phusion.gpg >/dev/null  && \
-apt -y dist-upgrade && \
-apt install -y --no-install-recommends build-essential libssl-dev libffi-dev python3-dev net-tools libsasl2-dev curl wget procps git libnss3-tools python3-pip && \
-apt install -y software-properties-common  && add-apt-repository -y ppa:deadsnakes/ppa && apt install -y python3.11 && \
+apt --allow-insecure-repositories -y dist-upgrade && \
+apt install --allow-insecure-repositories -y --no-install-recommends build-essential libssl-dev libffi-dev python3-dev net-tools libsasl2-dev curl wget procps git libnss3-tools python3-pip && \
+apt install --allow-insecure-repositories -y software-properties-common  && add-apt-repository -y ppa:deadsnakes/ppa && apt install -y python3.11 && \
 rm /usr/bin/python && ln -s /usr/bin/python3.11 /usr/bin/python && \
 python -m pip install virtualenv && \
 cd /opt && \
