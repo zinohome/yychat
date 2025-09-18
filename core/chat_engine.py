@@ -399,8 +399,9 @@ class ChatEngine:
         new_messages.append({"role": "assistant", "tool_calls": tool_calls})
         new_messages.extend(tool_response_messages)
         
-        # 重新生成响应
-        return await self.generate_response(new_messages, conversation_id, use_tools=False)
+        # 重新生成响应 - 明确设置stream=False
+        # 确保generate_response返回字典而不是异步生成器
+        return await self.generate_response(new_messages, conversation_id, use_tools=False, stream=False)
     
     async def call_mcp_service(self, tool_name: str = None, params: dict = None, 
                          service_name: str = None, method_name: str = None, 
