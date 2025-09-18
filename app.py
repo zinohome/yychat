@@ -125,12 +125,13 @@ async def create_chat_completion(request: ChatCompletionRequest):
                 except Exception as e:
                     logger.error(f"Error in stream generator: {e}")
                     # 发送错误消息
+                    error_message = f"发生错误: {str(e)}"
                     error_data = {
                         "id": f"chatcmpl-{conversation_id}",
                         "object": "chat.completion.chunk",
                         "created": int(asyncio.get_event_loop().time()),
                         "model": request.model,
-                        "choices": [{"index": 0, "delta": {"content": f"发生错误: {str(e)}"}, "finish_reason": "error"}]
+                        "choices": [{"index": 0, "delta": {"content": error_message}, "finish_reason": "error"}]
                     }
                     yield f"data: {json.dumps(error_data)}\n\n"
                     # 确保发送DONE标记
