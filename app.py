@@ -9,6 +9,7 @@ import uvicorn
 from config.config import get_config
 from config.log_config import get_logger
 from core.chat_engine import chat_engine
+from core.chat_memory import get_async_chat_memory
 from core.personality_manager import PersonalityManager
 from services.tools.registry import tool_registry
 # 添加工具自动发现导入
@@ -215,6 +216,23 @@ async def get_conversation_memory(conversation_id: str):
         "data": memories,
         "total": len(memories)
     }
+
+@app.get("/api/verify-memory/{conversation_id}", tags=["Services"])
+async def verify_memory(conversation_id: str):
+    """验证指定会话ID的记忆是否存在"""
+    try:
+        memories = chat_engine.get_conversation_memory(conversation_id)
+        return {
+            "success": True,
+            "conversation_id": conversation_id,
+            "memory_count": len(memories),
+            "memories": memories[:5]  # 只返回前5条避免响应过大
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 # MCP服务调用API
 @app.post("/v1/mcp/call", tags=["Services"])

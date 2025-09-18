@@ -1,5 +1,5 @@
-import os
 from dotenv import load_dotenv
+import os
 
 # 加载环境变量
 load_dotenv()
@@ -25,7 +25,12 @@ class Config:
     
     # 日志配置
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
- 
+    
+    # Memory配置
+    # 控制会话中写入memory的时机
+    # 可选值: both(同时保存用户输入和助手回复), user_only(只保存用户输入), assistant_only(只保存助手回复)
+    MEMORY_SAVE_MODE = os.getenv("MEMORY_SAVE_MODE", "both")
+    
     # 服务器配置
     SERVER_HOST = os.getenv("SERVER_HOST", "0.0.0.0")
     SERVER_PORT = int(os.getenv("SERVER_PORT", "8000"))

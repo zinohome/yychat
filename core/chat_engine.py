@@ -433,20 +433,63 @@ class ChatEngine:
     def clear_conversation_memory(self, conversation_id: str):
         self.chat_memory.delete_memory(conversation_id)
     
-    # 获取会话记忆
-    def get_conversation_memory(self, conversation_id: str) -> list:
-        return self.chat_memory.get_all_memory(conversation_id)
+    # 获取会话记忆 - 同步版本
+    def get_conversation_memory(self, conversation_id: str = "default") -> list:
+        """获取对话的所有记忆，使用同步方法直接获取"""
+        try:
+            # 直接使用同步版本的chat_memory实例获取记忆
+            memories = self.chat_memory.get_all_memory(conversation_id)
+            logger.debug(f"Successfully retrieved {len(memories)} memories for conversation {conversation_id}")
+            return memories
+        except Exception as e:
+            logger.error(f"Failed to get conversation memory: {e}")
+            return []
+
+    # 获取会话记忆 - 异步版本
+    async def aget_conversation_memory(self, conversation_id: str) -> list:
+        """获取会话记忆（异步版本）"""
+        try:
+            # 直接调用异步记忆实例的方法
+            return await self.async_chat_memory.get_all_memory(conversation_id)
+        except Exception as e:
+            logger.error(f"异步获取会话记忆时出错: {e}")
+            return []
 
     # 异步保存消息到记忆 - 使用原生异步API
     async def _async_save_message_to_memory(self, conversation_id: str, messages: list):
         """异步保存消息到记忆，使用mem0的原生AsyncMemory API"""
         try:
-            logger.debug(f"使用原生异步API保存消息到记忆: {messages}, conversation_id: {conversation_id}")
+            # 根据配置决定保存哪些消息
+            messages_to_save = []
             
-            # 批量保存消息
-            await self.async_chat_memory.add_messages_batch(conversation_id, messages)
+            if config.MEMORY_SAVE_MODE == "both":
+                # 保存所有消息（助手回复和用户输入）
+                messages_to_save = messages
+            elif config.MEMORY_SAVE_MODE == "user_only":
+                # 只保存用户输入的消息
+                messages_to_save = [msg for msg in messages if msg.get("role") == "user"]
+            elif config.MEMORY_SAVE_MODE == "assistant_only":
+                # 只保存助手回复的消息
+                messages_to_save = [msg for msg in messages if msg.get("role") == "assistant"]
+            else:
+                # 默认保存所有消息
+                messages_to_save = messages
+                logger.warning(f"未知的MEMORY_SAVE_MODE配置值: {config.MEMORY_SAVE_MODE}，默认保存所有消息")
             
-            logger.debug("使用原生异步API保存消息到记忆完成")
+            if messages_to_save:
+                logger.debug(f"使用原生异步API保存消息到记忆: 模式={config.MEMORY_SAVE_MODE}, 消息数量={len(messages_to_save)}, conversation_id={conversation_id}")
+                
+                # 记录将要保存的消息内容（为了避免日志过大，可以只记录第一条和最后一条）
+                if len(messages_to_save) > 0:
+                    logger.debug(f"第一条消息内容预览: {messages_to_save[0].get('content', '')[:100]}...")
+                    if len(messages_to_save) > 1:
+                        logger.debug(f"最后一条消息内容预览: {messages_to_save[-1].get('content', '')[:100]}...")
+                
+                # 批量保存消息
+                await self.async_chat_memory.add_messages_batch(conversation_id, messages_to_save)
+                logger.debug("使用原生异步API保存消息到记忆完成")
+            else:
+                logger.debug(f"根据配置 MEMORY_SAVE_MODE={config.MEMORY_SAVE_MODE}，没有消息需要保存到记忆")
         except Exception as e:
             logger.error(f"使用原生异步API保存消息到记忆失败: {e}", exc_info=True)
 

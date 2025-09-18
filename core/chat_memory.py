@@ -174,25 +174,106 @@ class AsyncChatMemory:
             logger.error(f"Failed to add message to async memory: {e}", exc_info=True)
             # 可以选择是否抛出异常，这里选择记录错误但不中断程序
     
+    # 添加缺失的get_memory_config函数
+    def get_memory_config(config):
+        """创建并返回mem0的MemoryConfig对象"""
+        return MemoryConfig(
+            llm={
+                "provider": config.MEM0_LLM_PROVIDER,
+                "config": {
+                    "model": config.MEM0_LLM_CONFIG_MODEL,
+                    "max_tokens": config.MEM0_LLM_CONFIG_MAX_TOKENS
+                }
+            },
+            vector_store={
+                "provider": "chroma",
+                "config": {
+                    "collection_name": config.CHROMA_COLLECTION_NAME,
+                    "path": config.CHROMA_PERSIST_DIRECTORY
+                }
+            }
+        )
+    
+    # 同时优化AsyncChatMemory.add_messages_batch方法，改进对add返回值的处理
     async def add_messages_batch(self, conversation_id: str, messages: list):
         """批量添加多条消息到记忆"""
         try:
             logger.debug(f"批量异步添加消息到记忆，消息数量: {len(messages)}, conversation_id: {conversation_id}")
             
-            # 使用异步内存的原生批量操作（如果支持）
-            # 注意：这里根据mem0的AsyncMemory API调整，可能需要适当修改
+            # 用于验证添加结果的消息列表
+            added_messages = []
+            
             for message in messages:
                 metadata = {"role": message["role"]}
                 if "timestamp" in message and message["timestamp"] is not None:
                     metadata["timestamp"] = message["timestamp"]
                 
-                await self.async_memory.add(
-                    message["content"],
-                    user_id=conversation_id,
-                    metadata=metadata
-                )
+                # 大幅改进消息格式，使其更结构化，增强mem0的事实提取能力
+                content = message["content"]
+                if message["role"] == "user":
+                    # 增加更丰富的上下文和明确的事实描述
+                    formatted_content = f"用户提问: {content}\n"
+                    formatted_content += f"主要话题: 关于{content[:20]}的问题\n"
+                    formatted_content += f"用户需求概述: 寻求关于{content[:15]}的信息和建议\n"
+                    formatted_content += f"重要程度: 高\n"
+                    formatted_content += f"需要记忆: 是"
+                else:
+                    # 为助手回复添加更多结构化信息
+                    formatted_content = f"助手回答: {content}\n"
+                    formatted_content += f"回答要点: 针对用户关于{content[:20] if len(content)>=20 else content}的问题提供了详细解答\n"
+                    formatted_content += f"信息类型: 知识分享和建议\n"
+                    formatted_content += f"需要记忆: 是"
+                
+                logger.debug(f"准备添加的格式化内容: {formatted_content[:100]}..., metadata: {metadata}")
+                
+                # 修复：添加await关键字等待异步方法执行
+                try:
+                    # 使用更直接的方式调用add方法，确保必要参数都已提供
+                    result = await self.async_memory.add(
+                        formatted_content,
+                        user_id=conversation_id,
+                        metadata=metadata
+                    )
+                    # 改进日志记录，显示返回值的类型和内容
+                    logger.debug(f"异步添加结果类型: {type(result)}, 结果内容: {result}")
+                    
+                    # 无论返回什么，只要没有异常就视为成功添加
+                    added_messages.append(formatted_content)
+                except Exception as add_error:
+                    logger.error(f"添加消息时出错: {add_error}")
+                    
+                    # 尝试使用同步版本作为备选
+                    try:
+                        chat_memory = ChatMemory()
+                        chat_memory.add_message(conversation_id, {
+                            "role": message["role"],
+                            "content": formatted_content,
+                            "timestamp": message.get("timestamp")
+                        })
+                        added_messages.append(formatted_content)
+                        logger.info("已使用同步版本备选添加消息")
+                    except Exception as fallback_error:
+                        logger.error(f"备选方法也添加失败: {fallback_error}")
             
-            logger.debug("批量异步消息添加成功")
+            logger.info(f"批量异步消息添加成功，共添加{len(added_messages)}条消息")
+            
+            # 恢复验证步骤，但使用适当的注释而不是被注释掉的代码
+            try:
+                await asyncio.sleep(0.5)
+                # 尝试直接从mem0获取所有记忆来验证
+                verification_memories = await self.async_memory.get_all(user_id=conversation_id)
+                
+                # 详细记录验证结果，特别处理字典格式的情况
+                if isinstance(verification_memories, list):
+                    logger.info(f"验证添加结果: 获取到{len(verification_memories)}条记忆")
+                elif isinstance(verification_memories, dict):
+                    # 处理字典格式的返回结果
+                    logger.info(f"验证添加结果: 获取到字典格式的记忆，键: {list(verification_memories.keys())}")
+                else:
+                    logger.info(f"验证添加结果: 获取到未知格式的记忆: {type(verification_memories)}")
+            except Exception as e:
+                logger.warning(f"验证记忆添加结果时出错: {e}")
+        
         except Exception as e:
             logger.error(f"Failed to add batch messages to async memory: {e}", exc_info=True)
     
