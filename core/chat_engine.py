@@ -263,8 +263,8 @@ class ChatEngine:
             tool_calls = None
             full_content = ""
             
-            # 流式处理响应
-            async for chunk in response:
+            # 流式处理响应 - 使用普通for循环处理同步流
+            for chunk in response:
                 if chunk.choices and len(chunk.choices) > 0:
                     choice = chunk.choices[0]
                     
