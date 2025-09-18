@@ -1,6 +1,7 @@
 #!/bin/bash
 set -e
 set -x
+apt clean && rm -rf /var/lib/apt/lists/* && apt update  && \
 apt-get update && DEBIAN_FRONTEND=noninteractive && \
 apt-get install -y dirmngr gnupg apt-transport-https ca-certificates curl && \
 curl https://oss-binaries.phusionpassenger.com/auto-software-signing-gpg-key.txt | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/phusion.gpg >/dev/null  && \
