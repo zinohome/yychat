@@ -264,7 +264,7 @@ class ChatEngine:
             full_content = ""
             
             # 流式处理响应
-            for chunk in response:
+            async for chunk in response:
                 if chunk.choices and len(chunk.choices) > 0:
                     choice = chunk.choices[0]
                     
