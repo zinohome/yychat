@@ -12,8 +12,8 @@ cd /opt && \
 git clone https://github.com/zinohome/yychat.git && \
 cd /opt/yychat/ && \
 git pull && \
-virtualenv venv && \
-. venv/bin/activate && \
+virtualenv .venv && \
+. .venv/bin/activate && \
 pip install -r requirements.txt && \
 cp /opt/yychat/docker/bd_build/50_start_h.sh /etc/my_init.d/50_start_h.sh &&
 chmod 755 /etc/my_init.d/50_start_h.sh
