@@ -40,9 +40,9 @@ bearer_scheme = HTTPBearer()
 
 # 创建FastAPI应用
 app = FastAPI(
-    title="OpenAI兼容聊天机器人API",
-    description="使用Mem0和ChromaDB进行记忆管理的聊天机器人API",
-    version="1.0.0",
+    title=config.API_TITLE,
+    description=config.API_DESCRIPTION,
+    version=config.API_VERSION,
     # 添加安全方案
     openapi_security=[
         {
@@ -331,8 +331,8 @@ async def call_mcp_service(request: MCPServiceCallRequest, api_key: str = Depend
 @app.get("/")
 async def root():
     return {
-        "message": "Welcome to the OpenAI compatible Chat API",
-        "version": "1.0.0",
+        "message": f"Welcome to the YYChat OpenAI Compatible API",
+        "version": config.API_VERSION,
         "api_endpoints": ["/v1/chat/completions", "/v1/models", "/v1/personalities"]
     }
 

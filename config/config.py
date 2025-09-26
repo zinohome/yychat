@@ -44,6 +44,11 @@ class Config:
     # 响应流和工具使用默认配置
     STREAM_DEFAULT = os.getenv("STREAM_DEFAULT", "True").lower() == "true"
     USE_TOOLS_DEFAULT = os.getenv("USE_TOOLS_DEFAULT", "True").lower() == "true"
+    
+    # API元数据配置
+    API_TITLE = os.getenv("API_TITLE", "YYChat OpenAI兼容API")
+    API_DESCRIPTION = os.getenv("API_DESCRIPTION", "YYChat是一个基于OpenAI API的聊天机器人，使用Mem0和ChromaDB进行记忆管理。")
+    API_VERSION = os.getenv("API_VERSION", "0.1.1")
 
 # 创建配置实例
 def get_config():
