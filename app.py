@@ -2,6 +2,7 @@ import json
 import asyncio
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import ValidationError
 from typing import List, Dict, Any, Optional, Union
 import uvicorn
@@ -34,11 +35,29 @@ from schemas.api_schemas import (
 logger = get_logger(__name__)
 config = get_config()
 
+# 创建HTTPBearer安全方案
+bearer_scheme = HTTPBearer()
+
 # 创建FastAPI应用
 app = FastAPI(
     title="OpenAI兼容聊天机器人API",
     description="使用Mem0和ChromaDB进行记忆管理的聊天机器人API",
-    version="1.0.0"
+    version="1.0.0",
+    # 添加安全方案
+    openapi_security=[
+        {
+            "Bearer Auth": {}
+        }
+    ],
+    openapi_components={
+        "securitySchemes": {
+            "Bearer Auth": {
+                "type": "http",
+                "scheme": "bearer",
+                "bearerFormat": "API Key"
+            }
+        }
+    }
 )
 
 # 初始化人格管理器
@@ -46,6 +65,27 @@ personality_manager = PersonalityManager()
 # 初始化工具管理器
 tool_manager = ToolManager()
 
+# 认证依赖函数 - 更新为使用HTTPBearer
+def verify_api_key(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)):
+    """验证API密钥，兼容OpenAI的认证方式"""
+    # 从credentials中获取API密钥
+    api_key = credentials.credentials
+    
+    # 验证API密钥是否匹配
+    if api_key != config.YYCHAT_API_KEY:
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "error": {
+                    "message": "Incorrect API key provided",
+                    "type": "invalid_request_error",
+                    "param": None,
+                    "code": "invalid_api_key"
+                }
+            }
+        )
+    
+    return api_key
 
 # 在应用初始化时自动注册所有工具
 @app.on_event("startup")
@@ -76,7 +116,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 # 聊天完成API
 @app.post("/v1/chat/completions", response_model=ChatCompletionResponse)
-async def create_chat_completion(request: ChatCompletionRequest):
+async def create_chat_completion(request: ChatCompletionRequest, api_key: str = Depends(verify_api_key)):
     try:
         # 打印完整的request内容，用于调试conversation_id问题
         logger.debug(f"完整的请求内容: {request.model_dump()}")
@@ -175,7 +215,7 @@ async def create_chat_completion(request: ChatCompletionRequest):
 
 # 模型列表API
 @app.get("/v1/models")
-async def list_models():
+async def list_models(api_key: str = Depends(verify_api_key)):
     return {
         "object": "list",
         "data": [
@@ -190,7 +230,7 @@ async def list_models():
 
 # 获取模型详情API
 @app.get("/v1/models/{model_id}")
-async def get_model(model_id: str):
+async def get_model(model_id: str, api_key: str = Depends(verify_api_key)):
     if model_id != config.OPENAI_MODEL:
         raise HTTPException(status_code=404, detail={"error": {"message": "Model not found", "type": "invalid_request_error"}})
     
@@ -203,7 +243,7 @@ async def get_model(model_id: str):
 
 # 人格管理API
 @app.get("/v1/personalities")
-async def list_personalities():
+async def list_personalities(api_key: str = Depends(verify_api_key)):
     return {
         "object": "list",
         "data": personality_manager.list_personalities()
@@ -211,7 +251,7 @@ async def list_personalities():
 
 # 清除会话记忆API
 @app.delete("/v1/conversations/{conversation_id}/memory", tags=["Services"])
-async def clear_conversation_memory(conversation_id: str):
+async def clear_conversation_memory(conversation_id: str, api_key: str = Depends(verify_api_key)):
     chat_engine.clear_conversation_memory(conversation_id)
     return {
         "success": True,
@@ -220,7 +260,7 @@ async def clear_conversation_memory(conversation_id: str):
 
 # 获取会话记忆API
 @app.get("/v1/conversations/{conversation_id}/memory", tags=["Services"])
-async def get_conversation_memory(conversation_id: str):
+async def get_conversation_memory(conversation_id: str, api_key: str = Depends(verify_api_key)):
     memories = chat_engine.get_conversation_memory(conversation_id)
     return {
         "object": "list",
@@ -229,7 +269,7 @@ async def get_conversation_memory(conversation_id: str):
     }
 
 @app.get("/api/verify-memory/{conversation_id}", tags=["Services"])
-async def verify_memory(conversation_id: str):
+async def verify_memory(conversation_id: str, api_key: str = Depends(verify_api_key)):
     """验证指定会话ID的记忆是否存在"""
     try:
         memories = chat_engine.get_conversation_memory(conversation_id)
@@ -247,7 +287,7 @@ async def verify_memory(conversation_id: str):
 
 # MCP服务调用API
 @app.post("/v1/mcp/call", tags=["Services"])
-async def call_mcp_service(request: MCPServiceCallRequest):
+async def call_mcp_service(request: MCPServiceCallRequest, api_key: str = Depends(verify_api_key)):
     try:
         # 提取参数，增加对mcp_server的支持
         tool_name = request.tool_name
@@ -287,7 +327,7 @@ async def call_mcp_service(request: MCPServiceCallRequest):
         logger.error(f"MCP service call error: {e}")
         raise HTTPException(status_code=500, detail={"error": {"message": str(e), "type": "server_error"}})
         
-# 根路径API
+# 根路径API - 可以不需要认证
 @app.get("/")
 async def root():
     return {
@@ -298,7 +338,7 @@ async def root():
 
 # 列出所有工具
 @app.get("/v1/tools", tags=["Services"])
-async def list_available_tools():
+async def list_available_tools(api_key: str = Depends(verify_api_key)):
     """列出所有已注册的非MCP工具"""
     try:
         # 获取所有工具
@@ -323,7 +363,7 @@ async def list_available_tools():
 
 # 列出所有MCP工具
 @app.get("/v1/mcp/tools", tags=["Services"])
-async def list_available_mcp_tools():
+async def list_available_mcp_tools(api_key: str = Depends(verify_api_key)):
     """列出所有已注册的MCP工具"""
     try:
         # 使用mcp_manager获取MCP工具列表
@@ -339,7 +379,7 @@ async def list_available_mcp_tools():
 
 # 工具调用API - 用于调用非MCP工具
 @app.post("/v1/tools/call", tags=["Services"])
-async def call_tool(request: ToolCallRequest):
+async def call_tool(request: ToolCallRequest, api_key: str = Depends(verify_api_key)):
     """调用指定的非MCP工具"""
     try:
         # 提取参数

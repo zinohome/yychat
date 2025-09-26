@@ -13,6 +13,9 @@ class Config:
     OPENAI_MAX_TOKENS = int(os.getenv("OPENAI_MAX_TOKENS", "16384"))  # 在配置中直接转换为整数
     TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
     
+    # 本服务的API密钥配置
+    YYCHAT_API_KEY = os.getenv("YYCHAT_API_KEY", "yk-1aB2cD3eF4gH5iJ6kL7mN8oP9qR0sT1uV2wX3yZ4")
+    
     # Mem0配置
     MEM0_API_KEY = os.getenv("MEM0_API_KEY")
     MEM0_LLM_PROVIDER = os.getenv("MEM0_LLM_PROVIDER", "openai")
