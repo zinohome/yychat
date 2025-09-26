@@ -184,7 +184,8 @@ async def create_chat_completion(request: ChatCompletionRequest, api_key: str = 
                 request.messages,
                 conversation_id,
                 request.personality_id,
-                request.use_tools
+                request.use_tools,
+                stream=False
             )
             
             # 构建响应
