@@ -1,4 +1,6 @@
 import os
+from typing import Optional
+import threading
 from mem0 import Memory, AsyncMemory
 from mem0.configs.base import MemoryConfig
 from config.config import get_config
@@ -10,24 +12,24 @@ logger = get_logger(__name__)
 class ChatMemory:
     def __init__(self, memory=None):
         # 在__init__方法内获取配置
-        config = get_config()
+        self.config = get_config()  # 保存配置为实例变量
         
         # 如果没有提供memory对象，创建一个新的
         if memory is None:
             # 正确创建MemoryConfig对象来配置Memory，使用path而不是persist_directory
             memory_config = MemoryConfig(
                 llm={
-                    "provider": config.MEM0_LLM_PROVIDER,
+                    "provider": self.config.MEM0_LLM_PROVIDER,
                     "config": {
-                        "model": config.MEM0_LLM_CONFIG_MODEL, 
-                        "max_tokens": config.MEM0_LLM_CONFIG_MAX_TOKENS
+                        "model": self.config.MEM0_LLM_CONFIG_MODEL, 
+                        "max_tokens": self.config.MEM0_LLM_CONFIG_MAX_TOKENS
                     }
                 },
                 vector_store={
                     "provider": "chroma",
                     "config": {
-                        "collection_name": config.CHROMA_COLLECTION_NAME,
-                        "path": config.CHROMA_PERSIST_DIRECTORY
+                        "collection_name": self.config.CHROMA_COLLECTION_NAME,
+                        "path": self.config.CHROMA_PERSIST_DIRECTORY
                     }
                 }
             )
@@ -38,11 +40,22 @@ class ChatMemory:
             logger.debug(f"成功创建Memory实例: {self.memory}")
             
             # 确保持久化目录存在
-            os.makedirs(config.CHROMA_PERSIST_DIRECTORY, exist_ok=True)
+            os.makedirs(self.config.CHROMA_PERSIST_DIRECTORY, exist_ok=True)
         else:
             # 使用提供的memory对象
             self.memory = memory
-    
+
+    def _preprocess_query(self, query: str) -> str:
+        """预处理查询文本以提高检索效率"""
+        # 移除多余空格和换行
+        query = ' '.join(query.strip().split())
+        # 限制查询长度，过长的查询可能导致性能问题
+        max_query_length = 500  # 可配置化
+        if len(query) > max_query_length:
+            # 保留前max_query_length个字符，确保不会截断单词
+            query = query[:max_query_length].rsplit(' ', 1)[0]
+        return query
+
     def add_message(self, conversation_id: str, message: dict):
         try:
             logger.debug(f"添加消息到记忆: {message}, conversation_id: {conversation_id}")
@@ -61,28 +74,60 @@ class ChatMemory:
         except Exception as e:
             logger.error(f"Failed to add message to memory: {e}", exc_info=True)
     
-    def get_relevant_memory(self, conversation_id: str, query: str, limit: int = 5) -> list:
+    def get_relevant_memory(self, conversation_id: str, query: str, limit: Optional[int] = None) -> list:
+        # 如果没有提供limit，使用配置中的默认值
+        if limit is None:
+            limit = self.config.MEMORY_RETRIEVAL_LIMIT
+        
         try:
-            # 尝试get_relevant方法，并传递user_id参数
-            try:
-                memories = self.memory.get_relevant(query, limit=limit, user_id=conversation_id)
-            except AttributeError:
-                # 如果get_relevant不存在，尝试search方法（这是Mem0 v2.x的推荐方法）
+            # 添加超时控制
+            result = []
+            exception = None
+            
+            def _retrieve_memory():
+                nonlocal result, exception
                 try:
-                    memories = self.memory.search(query, limit=limit, user_id=conversation_id)
-                except AttributeError:
-                    # 如果search也不存在，尝试不带limit参数的get方法
-                    memories = self.memory.get(query, user_id=conversation_id)
-                    # 如果获取到的结果过多，手动截取
-                    if isinstance(memories, list) and len(memories) > limit:
-                        memories = memories[:limit]
-                        
-            # 处理不同格式的返回结果
-            if isinstance(memories, dict) and 'results' in memories:
-                return [mem.get('content', str(mem)) for mem in memories['results']]
-            elif isinstance(memories, list):
-                return [mem.get('content', str(mem)) for mem in memories]
-            return []
+                    # 尝试get_relevant方法，并传递user_id参数
+                    # 预处理查询
+                    processed_query = self._preprocess_query(query)
+                    try:
+                        memories = self.memory.get_relevant(processed_query, limit=limit, user_id=conversation_id)
+                    except AttributeError:
+                        # 如果get_relevant不存在，尝试search方法（这是Mem0 v2.x的推荐方法）
+                        try:
+                            memories = self.memory.search(processed_query, limit=limit, user_id=conversation_id)
+                        except AttributeError:
+                            # 如果search也不存在，尝试不带limit参数的get方法
+                            memories = self.memory.get(processed_query, user_id=conversation_id)
+                            # 如果获取到的结果过多，手动截取
+                            if isinstance(memories, list) and len(memories) > limit:
+                                memories = memories[:limit]
+                    
+                    # 处理不同格式的返回结果
+                    if isinstance(memories, dict) and 'results' in memories:
+                        result = [mem.get('content', str(mem)) for mem in memories['results']]
+                    elif isinstance(memories, list):
+                        result = [mem.get('content', str(mem)) for mem in memories]
+                except Exception as e:
+                    nonlocal exception
+                    exception = e
+            
+            # 创建并启动线程
+            thread = threading.Thread(target=_retrieve_memory)
+            thread.daemon = True
+            thread.start()
+            
+            # 等待线程完成或超时
+            thread.join(timeout=self.config.MEMORY_RETRIEVAL_TIMEOUT)
+            
+            if thread.is_alive():
+                logger.warning(f"记忆检索超时（{self.config.MEMORY_RETRIEVAL_TIMEOUT}秒）")
+                return []
+            
+            if exception:
+                raise exception
+            
+            return result
         except Exception as e:
             logger.error(f"Failed to get relevant memory: {e}")
             return []
@@ -155,6 +200,17 @@ class AsyncChatMemory:
             # 使用提供的async_memory对象
             self.async_memory = async_memory
     
+    def _preprocess_query(self, query: str) -> str:
+        """预处理查询文本以提高检索效率"""
+        # 移除多余空格和换行
+        query = ' '.join(query.strip().split())
+        # 限制查询长度，过长的查询可能导致性能问题
+        max_query_length = 500  # 可配置化
+        if len(query) > max_query_length:
+            # 保留前max_query_length个字符，确保不会截断单词
+            query = query[:max_query_length].rsplit(' ', 1)[0]
+        return query
+
     async def add_message(self, conversation_id: str, message: dict):
         try:
             logger.debug(f"异步添加消息到记忆: {message}, conversation_id: {conversation_id}")
@@ -277,14 +333,28 @@ class AsyncChatMemory:
         except Exception as e:
             logger.error(f"Failed to add batch messages to async memory: {e}", exc_info=True)
     
-    async def get_relevant_memory(self, conversation_id: str, query: str, limit: int = 5) -> list:
+    async def get_relevant_memory(self, conversation_id: str, query: str, limit: Optional[int] = None) -> list:
+        # 如果没有提供limit，使用配置中的默认值
+        if limit is None:
+            limit = self.config.MEMORY_RETRIEVAL_LIMIT
         try:
             # 直接调用AsyncMemory的get_relevant方法
-            memories = await self.async_memory.search(query, limit=limit, user_id=conversation_id)
+            # 预处理查询
+            processed_query = self._preprocess_query(query)
+            # 使用asyncio.wait_for添加超时控制
+            memories = await asyncio.wait_for(
+                self.async_memory.search(processed_query, limit=limit, user_id=conversation_id),
+                timeout=self.config.MEMORY_RETRIEVAL_TIMEOUT
+            )
             
             # 确保返回格式与同步版本兼容
             if isinstance(memories, dict) and "results" in memories:
-                return [mem["memory"] for mem in memories["results"]]
+                return [mem.get("memory", mem.get("content", str(mem))) for mem in memories["results"]]
+            elif isinstance(memories, list):
+                return [mem.get("content", str(mem)) for mem in memories]
+            return []
+        except asyncio.TimeoutError:
+            logger.warning(f"异步记忆检索超时（{self.config.MEMORY_RETRIEVAL_TIMEOUT}秒）")
             return []
         except Exception as e:
             logger.error(f"Failed to get relevant async memory: {e}")

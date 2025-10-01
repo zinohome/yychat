@@ -1,4 +1,5 @@
 import asyncio
+import time
 import json  # 添加 json 模块导入
 from typing import List, Dict, Any, Optional, AsyncGenerator
 import openai
@@ -24,20 +25,28 @@ config = get_config()
 
 class ChatEngine:
     def __init__(self):
-        # 添加SSL配置和超时设置
+        # 修改OpenAI客户端初始化配置
         self.client = OpenAI(
             api_key=config.OPENAI_API_KEY,
             base_url=config.OPENAI_BASE_URL,
-            # 添加超时设置
-            timeout=30.0,
-            # 配置HTTP客户端以处理SSL问题
+            # 从配置文件读取超时设置
+            timeout=config.OPENAI_API_TIMEOUT,
+            # 配置HTTP客户端以提高性能
             http_client=httpx.Client(
                 follow_redirects=True,
-                verify=False,  # 不进行SSL验证
-                # 可以尝试禁用HTTP/2，如果问题持续
-                http2=False,
-                # 增加连接超时
-                timeout=httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=30.0)
+                verify=config.VERIFY_SSL,  # 从配置读取SSL验证设置
+                http2=True,  # 启用HTTP/2以提高并发性能
+                timeout=httpx.Timeout(
+                    connect=config.OPENAI_CONNECT_TIMEOUT,  # 连接超时
+                    read=config.OPENAI_READ_TIMEOUT,        # 读取超时
+                    write=config.OPENAI_WRITE_TIMEOUT,      # 写入超时
+                    pool=config.OPENAI_POOL_TIMEOUT         # 池超时
+                ),
+                limits=httpx.Limits(
+                    max_connections=config.MAX_CONNECTIONS,  # 最大连接数
+                    max_keepalive_connections=config.MAX_KEEPALIVE_CONNECTIONS,  # 最大保持连接数
+                    keepalive_expiry=config.KEEPALIVE_EXPIRY  # 保持连接过期时间
+                )
             )
         )
         self.chat_memory = ChatMemory()
@@ -45,10 +54,13 @@ class ChatEngine:
         self.async_chat_memory = get_async_chat_memory()
         self.personality_manager = PersonalityManager()
         self.tool_manager = ToolManager()
-    
+       
+    # 在generate_response方法中添加性能监控
     async def generate_response(self, messages: List[Dict[str, str]], conversation_id: str = "default", 
                                personality_id: Optional[str] = None, use_tools: Optional[bool] = None, 
                                stream: Optional[bool] = None) -> Any:
+        # 记录总请求处理开始时间
+        total_start_time = time.time()
         try:
             # 打印传入的参数值，用于调试
             logger.debug(f"传入参数 - personality_id: {personality_id}, use_tools: {use_tools}, stream: {stream}, type(personality_id): {type(personality_id)}, type(use_tools): {type(use_tools)}, type(stream): {type(stream)}")
@@ -73,10 +85,10 @@ class ChatEngine:
                 stream = config.STREAM_DEFAULT
                 logger.info(f"未指定stream，使用默认值: {stream}")
             
-            # 首先从记忆中检索相关内容 - 这里使用同步版本，因为会影响响应生成
+            # 首先从记忆中检索相关内容 - 修改为使用异步版本
             if conversation_id != "default" and messages_copy:
                 # 使用messages_copy的最后一条消息作为查询
-                relevant_memories = self.chat_memory.get_relevant_memory(conversation_id, messages_copy[-1]["content"])
+                relevant_memories = await self.async_chat_memory.get_relevant_memory(conversation_id, messages_copy[-1]["content"])
                 if relevant_memories:
                     # 估算token数量并控制在模型限制内
                     memory_text = "\n".join(relevant_memories)
@@ -101,7 +113,6 @@ class ChatEngine:
                     else:
                         # 如果记忆太多，选择不添加
                         logger.warning(f"避免超出模型token限制，不添加记忆到系统提示。\n估算记忆token: {estimated_memory_tokens}, 用户消息token: {estimated_user_tokens}, 限制: {max_tokens * safety_margin}")
-            
             # 初始化allowed_tool_names为None
             allowed_tool_names = None
             
@@ -163,7 +174,8 @@ class ChatEngine:
                 logger.debug("工具调用已禁用")
             
             logger.debug(f"最终请求参数: {request_params}")
-
+            # 记录总请求处理时间
+            logger.debug(f"总请求处理时间一: {time.time() - total_start_time:.2f}秒")
             if stream:
                 # 直接返回异步生成器方法调用
                 return self._generate_streaming_response(request_params, conversation_id, messages)
@@ -250,21 +262,33 @@ class ChatEngine:
             return {"role": "assistant", "content": f"抱歉，我现在无法为您提供帮助。错误信息: {detailed_error}"}
     
     async def _generate_streaming_response(
-        self,
+        self, 
         request_params: Dict[str, Any],
         conversation_id: str,
         original_messages: List[Dict[str, str]]
     ) -> AsyncGenerator[Dict[str, Any], None]:
         try:
+            # 记录API调用开始时间
+            api_start_time = time.time()
             request_params["stream"] = True
-            response = self.client.chat.completions.create(**request_params)
             
-            # 用于检测是否有工具调用
+            # 使用异步方式调用API（如果OpenAI客户端支持）
+            response = self.client.chat.completions.create(**request_params)
+            logger.debug(f"OpenAI API调用耗时: {time.time() - api_start_time:.2f}秒")
+            
+            # 初始化变量
             tool_calls = None
             full_content = ""
+            chunk_count = 0
+            first_chunk_time = None
             
-            # 流式处理响应 - 使用普通for循环处理同步流
+            # 流式处理响应
             for chunk in response:
+                chunk_count += 1
+                if chunk_count == 1:
+                    first_chunk_time = time.time()
+                    logger.debug(f"首字节响应时间: {first_chunk_time - api_start_time:.2f}秒")
+                    
                 if chunk.choices and len(chunk.choices) > 0:
                     choice = chunk.choices[0]
                     
@@ -286,16 +310,51 @@ class ChatEngine:
                                     tool_calls[tool_call.index]["function"]["arguments"] = ""
                                 tool_calls[tool_call.index]["function"]["arguments"] += tool_call.function.arguments
                     
-                    # 处理普通内容
+                    # 处理普通内容，优化分块输出
                     elif choice.delta.content is not None:
                         content = choice.delta.content
                         full_content += content
-                        yield {
-                            "role": "assistant",
-                            "content": content,
-                            "finish_reason": None,
-                            "stream": True
-                        }
+                        
+                        # 对于大块内容，可以考虑按标点符号或固定长度分块
+                        if len(content) > 100:  # 超过100字符的大块内容
+                            # 寻找合适的分块点
+                            split_points = [i for i, c in enumerate(content) if c in ['.', '!', '?', '，', '。', '！', '？']]
+                            if split_points:
+                                # 有标点符号，按标点分块
+                                last_idx = 0
+                                for idx in split_points:
+                                    yield {
+                                        "role": "assistant",
+                                        "content": content[last_idx:idx+1],
+                                        "finish_reason": None,
+                                        "stream": True
+                                    }
+                                    last_idx = idx + 1
+                                # 发送剩余部分
+                                if last_idx < len(content):
+                                    yield {
+                                        "role": "assistant",
+                                        "content": content[last_idx:],
+                                        "finish_reason": None,
+                                        "stream": True
+                                    }
+                            else:
+                                # 没有标点符号，按固定长度分块
+                                for i in range(0, len(content), 100):
+                                    yield {
+                                        "role": "assistant",
+                                        "content": content[i:i+100],
+                                        "finish_reason": None,
+                                        "stream": True
+                                    }
+                        else:
+                            # 小块内容直接发送
+                            yield {
+                                "role": "assistant",
+                                "content": content,
+                                "finish_reason": None,
+                                "stream": True
+                            }
             
             # 检查是否有工具调用需要处理
             if tool_calls:
@@ -351,7 +410,7 @@ class ChatEngine:
                     "finish_reason": "stop",
                     "stream": True
                 }
-            
+            logger.debug(f"总块数: {chunk_count}, 总处理时间: {time.time() - api_start_time:.2f}秒")
         except Exception as e:
             logger.error(f"Error generating streaming response: {e}")
             yield {

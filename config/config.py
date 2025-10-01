@@ -1,9 +1,42 @@
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 import os
+import logging
+import sys
 
-# 加载环境变量
-load_dotenv()
+# 设置基本日志配置以便在配置加载前能记录问题
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
+# 获取当前文件所在目录的绝对路径
+base_dir = os.path.dirname(os.path.abspath(__file__))
+# 获取项目根目录
+project_root = os.path.dirname(base_dir)
+# 构造.env文件的绝对路径
+env_path = os.path.join(project_root, '.env')
+
+# 加载环境变量，并处理可能的错误
+try:
+    # find_dotenv会尝试定位.env文件，fallback到我们指定的路径
+    env_file = find_dotenv(usecwd=True) or env_path
+    
+    # 加载.env文件，如果不存在则尝试创建
+    if os.path.exists(env_file):
+        load_dotenv(dotenv_path=env_file, override=True)
+        logger.debug(f"成功加载.env文件: {env_file}")
+    else:
+        # 如果.env文件不存在，可以选择创建一个默认的
+        logger.warning(f".env文件不存在: {env_file}")
+        # 注意：如果要自动创建.env文件，可以取消下面的注释
+        # with open(env_file, 'w') as f:
+        #     f.write("# 默认环境变量配置\n")
+except Exception as e:
+    logger.error(f"加载.env文件时出错: {str(e)}")
+
+# 添加以下配置项
+# 在Config类中添加
 class Config:
     # OpenAI配置
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -29,11 +62,6 @@ class Config:
     # 日志配置
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
     
-    # Memory配置
-    # 控制会话中写入memory的时机
-    # 可选值: both(同时保存用户输入和助手回复), user_only(只保存用户输入), assistant_only(只保存助手回复)
-    MEMORY_SAVE_MODE = os.getenv("MEMORY_SAVE_MODE", "both")
-    
     # 服务器配置
     SERVER_HOST = os.getenv("SERVER_HOST", "0.0.0.0")
     SERVER_PORT = int(os.getenv("SERVER_PORT", "8000"))
@@ -49,7 +77,33 @@ class Config:
     API_TITLE = os.getenv("API_TITLE", "YYChat OpenAI兼容API")
     API_DESCRIPTION = os.getenv("API_DESCRIPTION", "YYChat是一个基于OpenAI API的聊天机器人，使用Mem0和ChromaDB进行记忆管理。")
     API_VERSION = os.getenv("API_VERSION", "0.1.1")
-
+    
+    # API性能相关配置 - 从环境变量读取，设置当前值为默认值
+    # OpenAI API性能配置
+    OPENAI_API_TIMEOUT = float(os.getenv("OPENAI_API_TIMEOUT", "30.0"))
+    OPENAI_CONNECT_TIMEOUT = float(os.getenv("OPENAI_CONNECT_TIMEOUT", "10.0"))
+    OPENAI_READ_TIMEOUT = float(os.getenv("OPENAI_READ_TIMEOUT", "30.0"))
+    OPENAI_WRITE_TIMEOUT = float(os.getenv("OPENAI_WRITE_TIMEOUT", "10.0"))
+    OPENAI_POOL_TIMEOUT = float(os.getenv("OPENAI_POOL_TIMEOUT", "30.0"))
+    OPENAI_API_RETRIES = int(os.getenv("OPENAI_API_RETRIES", "2"))
+    
+    # HTTP客户端配置
+    MAX_CONNECTIONS = int(os.getenv("MAX_CONNECTIONS", "100"))
+    MAX_KEEPALIVE_CONNECTIONS = int(os.getenv("MAX_KEEPALIVE_CONNECTIONS", "20"))
+    KEEPALIVE_EXPIRY = int(os.getenv("KEEPALIVE_EXPIRY", "30"))
+    VERIFY_SSL = os.getenv("VERIFY_SSL", "false").lower() == "true"
+    
+    # 记忆管理配置
+    MEMORY_RETRIEVAL_LIMIT = int(os.getenv("MEMORY_RETRIEVAL_LIMIT", "5"))
+    MEMORY_RETRIEVAL_TIMEOUT = float(os.getenv("MEMORY_RETRIEVAL_TIMEOUT", "2.0"))
+    
+    # 流式响应优化配置
+    CHUNK_SPLIT_THRESHOLD = int(os.getenv("CHUNK_SPLIT_THRESHOLD", "100"))
+    # Memory配置
+    # 控制会话中写入memory的时机
+    # 可选值: both(同时保存用户输入和助手回复), user_only(只保存用户输入), assistant_only(只保存助手回复)
+    MEMORY_SAVE_MODE = os.getenv("MEMORY_SAVE_MODE", "both")
+    
 # 创建配置实例
 def get_config():
     return Config()
