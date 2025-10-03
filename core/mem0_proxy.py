@@ -1,19 +1,25 @@
 import time
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, AsyncGenerator
 import openai
 from openai import OpenAI
 from mem0.proxy.main import Mem0
 import time
+import json
+import asyncio
 from config.config import get_config
 from config.log_config import get_logger
+from core.chat_memory import ChatMemory, get_async_chat_memory
+from core.personality_manager import PersonalityManager
+from services.tools.manager import ToolManager
+from services.mcp.manager import mcp_manager
 
 logger = get_logger(__name__)
 config = get_config()
 
 class Mem0ProxyManager:
     """
-    基于Mem0官方Proxy接口的轻量级记忆管理器
-    特点：更接近官方示例的实现方式，性能更好，但功能相对简单
+    基于Mem0官方Proxy接口的聊天引擎，结合Mem0的高性能和完整的前端API功能支持
+    支持personality、conversation_id、use_tools、stream等功能
     """
     def __init__(self):
         # 初始化Mem0客户端
@@ -22,6 +28,28 @@ class Mem0ProxyManager:
         self.clients_cache = {}
         # 标记是否使用本地客户端（用于处理API差异）
         self.is_local_client = False
+        
+        # 初始化其他必要组件
+        self.chat_memory = ChatMemory()
+        self.async_chat_memory = get_async_chat_memory()
+        self.personality_manager = PersonalityManager()
+        self.tool_manager = ToolManager()
+        
+        # 初始化OpenAI客户端用于降级方案
+        self._init_openai_client()
+        
+    def _init_openai_client(self):
+        """初始化OpenAI客户端"""
+        try:
+            self.openai_client = OpenAI(
+                api_key=config.OPENAI_API_KEY,
+                base_url=config.OPENAI_BASE_URL,
+                timeout=config.OPENAI_API_TIMEOUT,
+                max_retries=config.OPENAI_API_RETRIES
+            )
+        except Exception as e:
+            logger.error(f"初始化OpenAI客户端失败: {e}")
+            self.openai_client = None
         
     def _init_mem0_client(self):
         """初始化基础Mem0客户端"""
@@ -112,64 +140,228 @@ class Mem0ProxyManager:
         # 返回客户端
         return self.clients_cache[user_id]
     
-    async def generate_response(self, messages: List[Dict[str, str]], user_id: str = "default",
-                               model: Optional[str] = None, stream: Optional[bool] = None,
-                               temperature: Optional[float] = None) -> Any:
+    async def generate_response(self, messages: List[Dict[str, str]], conversation_id: str = "default",
+                               personality_id: Optional[str] = None, use_tools: Optional[bool] = None,
+                               stream: Optional[bool] = None) -> Any:
         """
-        使用Mem0 Proxy接口生成响应
-        这个方法更接近官方示例，性能更好，但功能相对简单
+        生成聊天响应，支持personality、conversation_id、use_tools、stream等参数
+        与app.py中的create_chat_completion API完全兼容
         """
         start_time = time.time()
         try:
             # 使用默认值
-            if model is None:
-                model = config.OPENAI_MODEL
+            if use_tools is None:
+                use_tools = config.USE_TOOLS_DEFAULT
             if stream is None:
                 stream = config.STREAM_DEFAULT
-            if temperature is None:
-                temperature = float(config.OPENAI_TEMPERATURE)
             
-            # 获取客户端（注意：现在只返回客户端，不返回is_local标志）
-            client = self.get_client(user_id)
+            # 创建消息副本，避免修改原始消息
+            messages_copy = messages.copy()
             
-            # 直接调用客户端方法，因为我们已经在初始化时修复了add方法
-            response = client.chat.completions.create(
-                messages=messages,
-                model=model,
-                user_id=user_id,
-                stream=stream,
-                temperature=temperature,
-                # 可以添加Mem0特有的参数
-                limit=config.MEMORY_RETRIEVAL_LIMIT
-            )
+            # 应用人格
+            if personality_id:
+                messages_copy = self.personality_manager.apply_personality(messages_copy, personality_id)
+                logger.debug(f"Applied personality: {personality_id}")
             
-            logger.debug(f"Mem0代理响应生成耗时: {time.time() - start_time:.3f}秒")
-            return response
+            # 准备调用参数
+            call_params = {
+                "messages": messages_copy,
+                "model": config.OPENAI_MODEL,
+                "user_id": conversation_id,
+                "stream": stream,
+                "temperature": float(config.OPENAI_TEMPERATURE),
+                "limit": config.MEMORY_RETRIEVAL_LIMIT
+            }
+            
+            # 添加工具相关配置
+            if use_tools:
+                # 使用tool_registry获取工具的函数调用模式
+                from services.tools.registry import tool_registry
+                tools = tool_registry.get_functions_schema()
+                if tools:
+                    call_params["tools"] = tools
+                    call_params["tool_choice"] = "auto"
+                    logger.debug(f"Added {len(tools)} tools to the request")
+            
+            # 获取客户端
+            client = self.get_client(conversation_id)
+            
+            # 调用Mem0客户端生成响应
+            response = client.chat.completions.create(**call_params)
+            
+            if stream:
+                # 处理流式响应
+                return self._handle_streaming_response(response, conversation_id)
+            else:
+                # 处理非流式响应
+                return self._handle_non_streaming_response(response, messages, conversation_id)
+                
         except Exception as e:
             logger.error(f"使用Mem0代理生成响应失败: {e}")
             # 降级到直接调用OpenAI API
-            try:
-                openai_client = OpenAI(
-                    api_key=config.OPENAI_API_KEY,
-                    base_url=config.OPENAI_BASE_URL
-                )
-                response = openai_client.chat.completions.create(
-                    messages=messages,
-                    model=model or config.OPENAI_MODEL,
-                    stream=stream or config.STREAM_DEFAULT,
-                    temperature=temperature or float(config.OPENAI_TEMPERATURE)
-                )
-                return response
-            except Exception as fallback_error:
-                logger.error(f"降级到OpenAI API也失败: {fallback_error}")
-                # 返回错误响应
-                if stream:
-                    # 对于流式响应，返回一个异步生成器
-                    async def error_generator():
-                        yield {"role": "assistant", "content": f"发生错误: {str(fallback_error)}"}
-                    return error_generator()
-                else:
-                    return {"choices": [{"message": {"content": f"发生错误: {str(fallback_error)}"}}]}
+            return await self._fallback_to_openai(messages, conversation_id, personality_id, use_tools, stream)
+        finally:
+            logger.debug(f"Mem0代理响应生成耗时: {time.time() - start_time:.3f}秒")
+            
+    async def _handle_streaming_response(self, response, conversation_id: str) -> AsyncGenerator[Dict[str, Any], None]:
+        """处理流式响应"""
+        try:
+            # 从流式响应中提取内容
+            async for chunk in response:
+                if hasattr(chunk, 'choices') and chunk.choices:
+                    choice = chunk.choices[0]
+                    if hasattr(choice, 'delta') and hasattr(choice.delta, 'content') and choice.delta.content is not None:
+                        yield {
+                            "stream": True,
+                            "content": choice.delta.content,
+                            "finish_reason": choice.finish_reason
+                        }
+                    elif choice.finish_reason is not None:
+                        yield {
+                            "stream": True,
+                            "content": "",
+                            "finish_reason": choice.finish_reason
+                        }
+        except Exception as e:
+            logger.error(f"处理流式响应时出错: {e}")
+            yield {
+                "stream": True,
+                "content": f"发生错误: {str(e)}",
+                "finish_reason": "error"
+            }
+    
+    def _handle_non_streaming_response(self, response, messages: List[Dict[str, str]], conversation_id: str) -> Dict[str, Any]:
+        """处理非流式响应"""
+        if hasattr(response, 'choices') and response.choices:
+            message = response.choices[0].message
+            result = {
+                "role": "assistant",
+                "content": message.content
+            }
+            
+            # 提取usage信息
+            if hasattr(response, 'usage'):
+                result["usage"] = {
+                    "prompt_tokens": response.usage.prompt_tokens,
+                    "completion_tokens": response.usage.completion_tokens,
+                    "total_tokens": response.usage.total_tokens
+                }
+            
+            # 如果是本地客户端，需要手动保存记忆
+            if self.is_local_client and conversation_id != "default" and messages:
+                self._save_memory_to_chat_memory(messages, result, conversation_id)
+                
+            return result
+        
+        return {"role": "assistant", "content": "抱歉，未能生成响应。"}
+    
+    async def _fallback_to_openai(self, messages: List[Dict[str, str]], conversation_id: str, 
+                                personality_id: Optional[str], use_tools: bool, stream: bool) -> Any:
+        """降级到直接调用OpenAI API"""
+        try:
+            if not self.openai_client:
+                raise Exception("OpenAI客户端未初始化")
+            
+            # 应用人格
+            if personality_id:
+                messages = self.personality_manager.apply_personality(messages, personality_id)
+            
+            # 准备调用参数
+            call_params = {
+                "messages": messages,
+                "model": config.OPENAI_MODEL,
+                "stream": stream,
+                "temperature": float(config.OPENAI_TEMPERATURE)
+            }
+            
+            # 添加工具相关配置
+            if use_tools:
+                # 使用tool_registry获取工具的函数调用模式
+                from services.tools.registry import tool_registry
+                tools = tool_registry.get_functions_schema()
+                if tools:
+                    call_params["tools"] = tools
+                    call_params["tool_choice"] = "auto"
+            
+            response = self.openai_client.chat.completions.create(**call_params)
+            
+            if stream:
+                # 处理流式响应
+                return self._handle_streaming_response(response, conversation_id)
+            else:
+                # 处理非流式响应
+                return self._handle_non_streaming_response(response, messages, conversation_id)
+        except Exception as fallback_error:
+            logger.error(f"降级到OpenAI API也失败: {fallback_error}")
+            # 返回错误响应
+            if stream:
+                # 对于流式响应，返回一个异步生成器
+                async def error_generator():
+                    yield {"stream": True, "content": f"发生错误: {str(fallback_error)}", "finish_reason": "error"}
+                return error_generator()
+            else:
+                return {"role": "assistant", "content": f"发生错误: {str(fallback_error)}"}
+                
+    def _save_memory_to_chat_memory(self, messages: List[Dict[str, str]], response: Dict[str, Any], conversation_id: str):
+        """保存记忆到聊天记忆系统"""
+        try:
+            # 只保存用户和助手的最后一条消息
+            user_message = None
+            for msg in reversed(messages):
+                if msg.get("role") == "user":
+                    user_message = msg
+                    break
+            
+            if user_message and response.get("content"):
+                # 异步保存消息到记忆
+                asyncio.create_task(self.async_chat_memory.save_message(
+                    conversation_id=conversation_id,
+                    role="user",
+                    content=user_message.get("content", "")
+                ))
+                
+                asyncio.create_task(self.async_chat_memory.save_message(
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content=response.get("content", "")
+                ))
+        except Exception as e:
+            logger.error(f"保存记忆失败: {e}")
+            
+    def clear_conversation_memory(self, conversation_id: str):
+        """清除指定会话的记忆"""
+        try:
+            self.chat_memory.clear_memory(conversation_id)
+            logger.debug(f"Cleared memory for conversation: {conversation_id}")
+        except Exception as e:
+            logger.error(f"Failed to clear memory: {e}")
+            
+    def get_conversation_memory(self, conversation_id: str) -> List[Dict[str, Any]]:
+        """获取指定会话的记忆"""
+        try:
+            memories = self.chat_memory.get_memory(conversation_id)
+            logger.debug(f"Retrieved {len(memories)} memories for conversation: {conversation_id}")
+            return memories
+        except Exception as e:
+            logger.error(f"Failed to get memory: {e}")
+            return []
+            
+    async def call_mcp_service(self, tool_name: str, params: Dict[str, Any], 
+                             service_name: Optional[str] = None, method_name: Optional[str] = None, 
+                             mcp_server: Optional[str] = None) -> Dict[str, Any]:
+        """调用MCP服务"""
+        try:
+            # 使用mcp_manager调用MCP服务
+            # 注意：mcp_manager实际上是同步的call_tool方法，不是异步的call_service
+            result = mcp_manager.call_tool(
+                tool_name=tool_name,
+                arguments=params,
+                mcp_server=mcp_server
+            )
+            return result
+        except Exception as e:
+            logger.error(f"MCP service call failed: {e}")
+            return {"success": False, "error": str(e)}
 
 # 创建全局实例
 def get_mem0_proxy():
