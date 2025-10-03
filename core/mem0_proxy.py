@@ -3,6 +3,7 @@ from typing import List, Dict, Any, Optional
 import openai
 from openai import OpenAI
 from mem0.proxy.main import Mem0
+import time
 from config.config import get_config
 from config.log_config import get_logger
 
@@ -19,12 +20,15 @@ class Mem0ProxyManager:
         self._init_mem0_client()
         # 缓存已初始化的客户端，避免重复创建
         self.clients_cache = {}
+        # 标记是否使用本地客户端（用于处理API差异）
+        self.is_local_client = False
         
     def _init_mem0_client(self):
         """初始化基础Mem0客户端"""
         try:
             # 本地配置初始化函数，避免代码重复
-            def init_local_config():        
+            def init_local_config():
+                
                 mem_config = {
                     "vector_store": {
                         "provider": "chroma",
@@ -42,6 +46,23 @@ class Mem0ProxyManager:
                     }
                 }
                 self.base_client = Mem0(config=mem_config)
+                self.is_local_client = True
+                
+                # 为本地客户端的mem0_client添加包装，移除filters参数
+                if hasattr(self.base_client, 'mem0_client'):
+                    original_add = self.base_client.mem0_client.add
+                    
+                    # 创建一个新的add方法，它不接受filters参数
+                    def patched_add(*args, **kwargs):
+                        # 移除filters参数
+                        if 'filters' in kwargs:
+                            del kwargs['filters']
+                        # 调用原始方法
+                        return original_add(*args, **kwargs)
+                    
+                    # 应用补丁
+                    self.base_client.mem0_client.add = patched_add
+                
                 return "本地配置"
 
             # 判断逻辑简化：
@@ -53,6 +74,7 @@ class Mem0ProxyManager:
                 logger.info(f"强制使用{config_type}初始化Mem0客户端")
             elif config.MEM0_API_KEY:
                 self.base_client = Mem0(api_key=config.MEM0_API_KEY)
+                self.is_local_client = False
                 logger.info("使用Mem0 API密钥初始化客户端")
             else:
                 config_type = init_local_config()
@@ -61,6 +83,7 @@ class Mem0ProxyManager:
             logger.error(f"初始化Mem0客户端失败: {e}")
             # 创建一个模拟客户端用于降级处理
             self.base_client = self._create_mock_client()
+            self.is_local_client = True
     
     def _create_mock_client(self):
         """创建一个模拟客户端用于降级处理"""
@@ -86,6 +109,7 @@ class Mem0ProxyManager:
             # 注意：这里可以根据需要为不同用户创建不同配置的客户端
             # 目前简单实现为所有用户共享同一个基础客户端
             self.clients_cache[user_id] = self.base_client
+        # 返回客户端
         return self.clients_cache[user_id]
     
     async def generate_response(self, messages: List[Dict[str, str]], user_id: str = "default",
@@ -105,11 +129,10 @@ class Mem0ProxyManager:
             if temperature is None:
                 temperature = float(config.OPENAI_TEMPERATURE)
             
-            # 获取客户端
+            # 获取客户端（注意：现在只返回客户端，不返回is_local标志）
             client = self.get_client(user_id)
             
-            # 调用Mem0的chat.completions.create方法
-            # 这是与官方示例最接近的调用方式，性能更好
+            # 直接调用客户端方法，因为我们已经在初始化时修复了add方法
             response = client.chat.completions.create(
                 messages=messages,
                 model=model,

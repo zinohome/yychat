@@ -20,11 +20,27 @@ coloredlogs.DEFAULT_LEVEL_STYLES = {
 coloredlogs.DEFAULT_LOG_FORMAT = '%(asctime)s [%(levelname)s] %(name)s:%(lineno)d - %(message)s'
 coloredlogs.DEFAULT_DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 
+# 创建Pydantic警告过滤器
+class PydanticWarningFilter(logging.Filter):
+    def filter(self, record):
+        # 过滤掉特定的Pydantic废弃警告
+        if "PydanticDeprecatedSince211" in record.getMessage() and \
+           "model_fields" in record.getMessage() and \
+           "litellm_core_utils" in record.pathname:
+            return False
+        return True
+
 # 配置基础日志
 logging.basicConfig(
     level=getattr(logging, config.LOG_LEVEL.upper()),
     stream=sys.stdout,
 )
+
+# 为特定logger添加过滤器
+deprecated_filter = PydanticWarningFilter()
+logging.getLogger().addFilter(deprecated_filter)
+# 为litellm相关的logger添加过滤器
+logging.getLogger('litellm').addFilter(deprecated_filter)
 
 # 应用coloredlogs配置到根logger
 coloredlogs.install(level=getattr(logging, config.LOG_LEVEL.upper()))
