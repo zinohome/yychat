@@ -1,5 +1,5 @@
 import json
-import logging
+from utils.log import log
 import os
 from typing import Any, Dict, List
 
@@ -7,7 +7,7 @@ from config.config import get_config
 from services.mcp.exceptions import MCPServerNotFoundError, MCPToolNotFoundError, MCPServiceError
 from services.mcp.utils.mcp_client import McpClients
 
-logger = logging.getLogger(__name__)
+
 
 
 class MCPManager:
@@ -31,31 +31,31 @@ class MCPManager:
                 try:
                     with open(config_path, 'r', encoding='utf-8') as f:
                         servers_config = json.load(f)
-                    logger.info(f"Loading MCP servers config from file: {servers_config}")
+                    log.info(f"Loading MCP servers config from file: {servers_config}")
                     self._clients = McpClients(servers_config)
                 except json.JSONDecodeError as e:
-                    logger.error(f"Failed to parse MCP servers config JSON file: {str(e)}")
-                    logger.warning("Using empty MCP clients configuration")
+                    log.error(f"Failed to parse MCP servers config JSON file: {str(e)}")
+                    log.warning("Using empty MCP clients configuration")
                     self._clients = None
             else:
-                logger.warning(f"MCP servers config file not found at {config_path}")
+                log.warning(f"MCP servers config file not found at {config_path}")
                 # 回退到从环境变量加载
                 config = get_config()
                 servers_config_json = config.MCP_SERVERS_CONFIG
                 if servers_config_json:
                     try:
                         servers_config = json.loads(servers_config_json)
-                        logger.debug(f"Loading MCP servers config from environment variable: {servers_config}")
+                        log.debug(f"Loading MCP servers config from environment variable: {servers_config}")
                         self._clients = McpClients(servers_config)
                     except json.JSONDecodeError as e:
-                        logger.error(f"Failed to parse MCP servers config JSON from environment variable: {str(e)}")
-                        logger.warning("Using empty MCP clients configuration")
+                        log.error(f"Failed to parse MCP servers config JSON from environment variable: {str(e)}")
+                        log.warning("Using empty MCP clients configuration")
                         self._clients = None
                 else:
-                    logger.warning("No MCP servers config found")
+                    log.warning("No MCP servers config found")
                     self._clients = None
         except Exception as e:
-            logger.error(f"Failed to initialize MCP clients: {str(e)}")
+            log.error(f"Failed to initialize MCP clients: {str(e)}")
             # 使用None而不是抛出异常，这样应用程序可以继续运行
             self._clients = None
     
@@ -66,7 +66,7 @@ class MCPManager:
         try:
             return self._clients.fetch_tools()
         except Exception as e:
-            logger.error(f"Failed to list MCP tools: {str(e)}")
+            log.error(f"Failed to list MCP tools: {str(e)}")
             raise MCPServiceError(f"Failed to list MCP tools: {str(e)}")
     
     def call_tool(self, tool_name: str, arguments: Dict[str, Any], mcp_server: str = None) -> List[Dict]:
@@ -74,7 +74,7 @@ class MCPManager:
         if not self._clients:
             raise MCPServiceError("MCP clients not initialized")
         try:
-            logger.debug(f"Calling MCP tool: {tool_name}, arguments: {arguments}, server: {mcp_server or 'auto'}")
+            log.debug(f"Calling MCP tool: {tool_name}, arguments: {arguments}, server: {mcp_server or 'auto'}")
             
             # 如果指定了服务器，优先尝试在该服务器上调用
             if mcp_server:
@@ -99,7 +99,7 @@ class MCPManager:
         except MCPToolNotFoundError:
             raise
         except Exception as e:
-            logger.error(f"Failed to call MCP tool: {str(e)}")
+            log.error(f"Failed to call MCP tool: {str(e)}")
             raise MCPServiceError(f"Failed to call MCP tool: {str(e)}")
     
     def close(self):
@@ -108,7 +108,7 @@ class MCPManager:
             try:
                 self._clients.close()
             except Exception as e:
-                logger.error(f"Failed to close MCP clients: {str(e)}")
+                log.error(f"Failed to close MCP clients: {str(e)}")
 
 
 # 创建全局MCP管理器实例
@@ -139,5 +139,5 @@ def call_tool(self, tool_name: str, params: dict, mcp_server: str = None):
         
         raise MCPToolNotFoundError(f"Tool '{tool_name}' not found in any MCP server")
     except Exception as e:
-        logger.error(f"Error calling MCP tool '{tool_name}': {str(e)}")
+        log.error(f"Error calling MCP tool '{tool_name}': {str(e)}")
         raise MCPServiceError(f"Failed to call MCP tool: {str(e)}")

@@ -3,7 +3,7 @@ from unittest.mock import patch, MagicMock, mock_open
 import json
 import os
 from core.personality_manager import PersonalityManager, Personality
-from config.log_config import get_logger
+from utils.log import log
 
 @pytest.fixture
 def mock_config():

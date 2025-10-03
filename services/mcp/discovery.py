@@ -1,23 +1,23 @@
-import logging
+from utils.log import log
 from typing import Dict, Any
 
 from services.mcp.manager import mcp_manager
 from services.tools.registry import tool_registry
 from services.tools.base import Tool
 
-logger = logging.getLogger(__name__)
+
 
 def discover_and_register_mcp_tools():
     """发现并注册MCP工具"""
     try:
         # 检查mcp_manager是否初始化成功
         if not hasattr(mcp_manager, '_clients') or mcp_manager._clients is None:
-            logger.warning("MCP manager not properly initialized, skipping tool discovery")
+            log.warning("MCP manager not properly initialized, skipping tool discovery")
             return
         
         # 获取MCP服务中的所有工具
         tools = mcp_manager.list_tools()
-        logger.info(f"发现并注册MCP工具, 共发现 {len(tools)} 个工具")
+        log.info(f"发现并注册MCP工具, 共发现 {len(tools)} 个工具")
         
         # 动态创建Tool类并注册
         for tool_info in tools:
@@ -57,10 +57,10 @@ def discover_and_register_mcp_tools():
                             return result[0].get('text') or str(result)
                         return str(result)
                     except Exception as e:
-                        logger.error(f"Error executing MCP tool {self.name}: {str(e)}")
+                        log.error(f"Error executing MCP tool {self.name}: {str(e)}")
                         return f"执行MCP工具失败: {str(e)}"
             # 注册工具类本身，而不是实例
             tool_registry.register(DynamicMCPTool)
-            logger.debug(f"自动注册MCP tool: {tool_name}")
+            log.debug(f"自动注册MCP tool: {tool_name}")
     except Exception as e:
-        logger.error(f"Failed to discover and register MCP tools: {str(e)}")
+        log.error(f"Failed to discover and register MCP tools: {str(e)}")

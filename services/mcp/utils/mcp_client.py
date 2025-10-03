@@ -1,5 +1,5 @@
 import json
-import logging
+from utils.log import log
 import re
 import uuid
 from abc import ABC, abstractmethod
@@ -11,10 +11,6 @@ from urllib.parse import urljoin, urlparse
 import httpx
 from httpx_sse import connect_sse, EventSource
 from pydantic import BaseModel
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-
 
 class McpClient(ABC):
     """Interface for MCP client."""
@@ -61,7 +57,7 @@ class McpClient(ABC):
                 return []
             raise Exception(f"{self.name} - MCP Server tools/list error: {error}")
         tools = response.get("result", {}).get("tools", [])
-        logger.debug(f"{self.name} - MCP Server tools/list: {tools}")
+        log.debug(f"{self.name} - MCP Server tools/list: {tools}")
         return tools
 
     def call_tool(self, name: str, arguments: dict) -> list[dict]:
@@ -79,7 +75,7 @@ class McpClient(ABC):
             error = response["error"]
             raise Exception(f"{self.name} - MCP Server tools/call error: {error}")
         content = response.get("result", {}).get("content", [])
-        logger.debug(f"{self.name} - MCP Server tools/call: {content}")
+        log.debug(f"{self.name} - MCP Server tools/call: {content}")
         return content
 
     def list_resources(self) -> list[dict]:
@@ -98,7 +94,7 @@ class McpClient(ABC):
                 return []
             raise Exception(f"{self.name} - MCP Server resources/list error: {error}")
         resources = response.get("result", {}).get("resources", [])
-        logger.debug(f"{self.name} - MCP Server resources/list: {resources}")
+        log.debug(f"{self.name} - MCP Server resources/list: {resources}")
         return resources
 
     def read_resource(self, uri: str) -> list[dict]:
@@ -115,7 +111,7 @@ class McpClient(ABC):
             error = response["error"]
             raise Exception(f"{self.name} - MCP Server resources/read error: {error}")
         contents = response.get("result", {}).get("contents", [])
-        logger.debug(f"{self.name} - MCP Server resources/read: {contents}")
+        log.debug(f"{self.name} - MCP Server resources/read: {contents}")
         return contents
 
     def list_resources_templates(self) -> list[dict]:
@@ -133,7 +129,7 @@ class McpClient(ABC):
                 return []
             raise Exception(f"{self.name} - MCP Server resources/templates/list error: {error}")
         resources = response.get("result", {}).get("resourceTemplates", [])
-        logger.debug(f"{self.name} - MCP Server resources/templates/list: {resources}")
+        log.debug(f"{self.name} - MCP Server resources/templates/list: {resources}")
         return resources
 
     def list_prompts(self) -> list[dict]:
@@ -152,7 +148,7 @@ class McpClient(ABC):
                 return []
             raise Exception(f"{self.name} - MCP Server prompts/list error: {error}")
         prompts = response.get("result", {}).get("prompts", [])
-        logger.debug(f"{self.name} - MCP Server prompts/list: {prompts}")
+        log.debug(f"{self.name} - MCP Server prompts/list: {prompts}")
         return prompts
 
     def get_prompt(self, name: str, arguments: dict) -> list[dict]:
@@ -170,7 +166,7 @@ class McpClient(ABC):
             error = response["error"]
             raise Exception(f"{self.name} - MCP Server prompts/get error: {error}")
         messages = response.get("result", {}).get("messages", [])
-        logger.debug(f"{self.name} - MCP Server prompts/get: {messages}")
+        log.debug(f"{self.name} - MCP Server prompts/get: {messages}")
         return messages
 
 
@@ -203,7 +199,7 @@ class McpSseClient(McpClient):
 
     def _listen_messages(self) -> None:
         try:
-            logger.debug(f"{self.name} - Connecting to SSE endpoint: {self.remove_request_params(self.url)}")
+            log.debug(f"{self.name} - Connecting to SSE endpoint: {self.remove_request_params(self.url)}")
             with connect_sse(
                     client=self.client,
                     method="GET",
@@ -212,31 +208,31 @@ class McpSseClient(McpClient):
                     follow_redirects=True,
             ) as event_source:
                 event_source.response.raise_for_status()
-                logger.debug(f"{self.name} - SSE connection established")
+                log.debug(f"{self.name} - SSE connection established")
                 for sse in event_source.iter_sse():
-                    logger.debug(f"{self.name} - Received SSE event: {sse.event}")
+                    log.debug(f"{self.name} - Received SSE event: {sse.event}")
                     if self.should_stop.is_set():
                         break
                     match sse.event:
                         case "endpoint":
                             # self.endpoint_url = urljoin(self.url, sse.data)
                             self.endpoint_url = urljoin(self.url.rstrip("/"), sse.data.lstrip("/"))
-                            logger.debug(f"{self.name} - Received endpoint URL: {self.endpoint_url}")
+                            log.debug(f"{self.name} - Received endpoint URL: {self.endpoint_url}")
                             self._connected.set()
                             url_parsed = urlparse(self.url)
                             endpoint_parsed = urlparse(self.endpoint_url)
                             if (url_parsed.netloc != endpoint_parsed.netloc
                                     or url_parsed.scheme != endpoint_parsed.scheme):
                                 error_msg = f"{self.name} - Endpoint origin does not match connection origin: {self.endpoint_url}"
-                                logger.error(error_msg)
+                                log.error(error_msg)
                                 raise ValueError(error_msg)
                         case "message":
                             message = json.loads(sse.data)
-                            logger.debug(f"{self.name} - Received server message: {message}")
+                            log.debug(f"{self.name} - Received server message: {message}")
                             self.message_dict[message["id"]] = message
                             self.response_ready.set()
                         case _:
-                            logger.warning(f"{self.name} - Unknown SSE event: {sse.event}")
+                            log.warning(f"{self.name} - Unknown SSE event: {sse.event}")
         except Exception as e:
             self._thread_exception = e
             self._error_event.set()
@@ -248,7 +244,7 @@ class McpSseClient(McpClient):
                 raise ConnectionError(f"{self.name} - MCP Server connection failed: {self._thread_exception}")
             else:
                 raise RuntimeError(f"{self.name} - Please call connect() first")
-        logger.debug(f"{self.name} - Sending client message: {data}")
+        log.debug(f"{self.name} - Sending client message: {data}")
         response = self.client.post(
             url=self.endpoint_url,
             json=data,
@@ -257,7 +253,7 @@ class McpSseClient(McpClient):
             follow_redirects=True,
         )
         response.raise_for_status()
-        logger.debug(f"response status: {response.status_code} {response.reason_phrase}")
+        log.debug(f"response status: {response.status_code} {response.reason_phrase}")
         if not response.is_success:
             raise ValueError(
                 f"{self.name} - MCP Server response: {response.status_code} {response.reason_phrase} ({response.content})")
@@ -267,9 +263,9 @@ class McpSseClient(McpClient):
                 self.response_ready.wait()
                 self.response_ready.clear()
                 if message_id in self.message_dict:
-                    logger.debug(f"message_id: {message_id}")
+                    log.debug(f"message_id: {message_id}")
                     message = self.message_dict.pop(message_id, None)
-                    logger.debug(f"message: {message}")
+                    log.debug(f"message: {message}")
                     if message and message.get("method") == "ping":
                         continue
                     return message
@@ -349,7 +345,7 @@ class McpStreamableHttpClient(McpClient):
         headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
         if self.session_id:
             headers["Mcp-Session-Id"] = self.session_id
-        logger.debug(f"{self.name} - Sending client message: {data}")
+        log.debug(f"{self.name} - Sending client message: {data}")
         response = self.client.post(
             url=self.url,
             json=data,
@@ -357,14 +353,14 @@ class McpStreamableHttpClient(McpClient):
             timeout=httpx.Timeout(self.timeout),
             follow_redirects=True,
         )
-        logger.debug(f"response status: {response.status_code} {response.reason_phrase}")
+        log.debug(f"response status: {response.status_code} {response.reason_phrase}")
         if not response.is_success:
             raise ValueError(
                 f"{self.name} - MCP Server response: {response.status_code} {response.reason_phrase} ({response.content})")
-        logger.debug(f"response headers: {response.headers}")
+        log.debug(f"response headers: {response.headers}")
         if "mcp-session-id" in response.headers:
             self.session_id = response.headers.get("mcp-session-id")
-        logger.debug(f"response content: {response.content}")
+        log.debug(f"response content: {response.content}")
         if not response.content:
             return {}
         message = {}
@@ -378,7 +374,7 @@ class McpStreamableHttpClient(McpClient):
             message = (response.json() if response.content else None) or {}
         else:
             raise Exception(f"{self.name} - Unsupported Content-Type: {content_type}")
-        logger.debug(f"message: {message}")
+        log.debug(f"message: {message}")
         return message
 
     def initialize(self):
@@ -485,7 +481,7 @@ class McpClients:
                 
                 # 其余代码保持不变...
             
-            logger.debug(f"Fetching tools: {all_tools}")
+            log.debug(f"Fetching tools: {all_tools}")
             return all_tools
         except Exception as e:
             raise Exception(f"Error fetching tools: {str(e)}")
@@ -497,7 +493,7 @@ class McpClients:
             raise Exception(f"There is not a tool named {tool_name!r}")
         tool_action = self._tool_actions[tool_name]
         server_name = tool_action.server_name
-        logger.debug(f"Executing tool! server name: {server_name}, tool name: {tool_name}, tool arguments: {tool_args}")
+        log.debug(f"Executing tool! server name: {server_name}, tool name: {tool_name}, tool arguments: {tool_args}")
         if server_name not in self._clients:
             raise Exception(f"There is not a MCP Server named {server_name!r}")
         client = self._clients[server_name]
@@ -549,7 +545,7 @@ class McpClients:
                 })
             else:
                 raise Exception(f"Unsupported Action type: {action_type}")
-            logger.debug(f"Executing tool: {tool_contents}")
+            log.debug(f"Executing tool: {tool_contents}")
             return tool_contents
         except Exception as e:
             raise Exception(f"Error executing tool: {str(e)}")
@@ -559,4 +555,4 @@ class McpClients:
             try:
                 client.close()
             except Exception as e:
-                logger.error(e)
+                log.error(e)

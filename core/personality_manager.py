@@ -2,9 +2,9 @@ import json
 import os
 from pydantic import BaseModel, Field, ValidationError
 from typing import Dict, Optional, List
-from config.log_config import get_logger
+from utils.log import log
 
-logger = get_logger(__name__)
+
 
 class Personality(BaseModel):
     id: str = Field(..., description="人格ID")
@@ -67,9 +67,9 @@ class PersonalityManager:
                             personality = Personality(**data)
                             self.personalities[personality.id] = personality
                     except (json.JSONDecodeError, ValidationError) as e:
-                        logger.error(f"Failed to load personality from {file_path}: {e}")
+                        log.error(f"Failed to load personality from {file_path}: {e}")
         except Exception as e:
-            logger.error(f"Error loading personalities: {e}")
+            log.error(f"Error loading personalities: {e}")
     
     def add_personality(self, personality: Personality):
         self.personalities[personality.id] = personality
@@ -83,7 +83,7 @@ class PersonalityManager:
             with open(file_path, "w", encoding="utf-8") as f:
                 json.dump(personality.model_dump(), f, ensure_ascii=False, indent=2)
         except Exception as e:
-            logger.error(f"Failed to save personality {personality.id}: {e}")
+            log.error(f"Failed to save personality {personality.id}: {e}")
     
     def list_personalities(self) -> List[Dict[str, str]]:
         return [
@@ -94,7 +94,7 @@ class PersonalityManager:
     def apply_personality(self, messages: List[Dict[str, str]], personality_id: str) -> List[Dict[str, str]]:
         personality = self.get_personality(personality_id)
         if not personality:
-            logger.warning(f"Personality {personality_id} not found, using default")
+            log.warning(f"Personality {personality_id} not found, using default")
             return messages
         
         # 构建包含工具使用规则的系统提示词

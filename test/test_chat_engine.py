@@ -198,7 +198,7 @@ async def test_generate_response_avoid_token_limit(mock_config):
          patch('core.chat_engine.PersonalityManager') as mock_personality_manager_class, \
          patch('core.chat_engine.ToolManager') as mock_tool_manager_class, \
          patch('core.chat_engine.tool_registry.get_functions_schema') as mock_get_functions_schema, \
-         patch('core.chat_engine.logger.warning') as mock_logger_warning:
+         patch('core.chat_engine.log.warning') as mock_logger_warning:
         
         # 设置模拟对象
         mock_openai_instance = MagicMock()
@@ -551,7 +551,7 @@ async def test_call_mcp_service_mcp_error(mock_config):
          patch('core.chat_engine.PersonalityManager') as mock_personality_manager_class, \
          patch('core.chat_engine.ToolManager') as mock_tool_manager_class, \
          patch('core.chat_engine.mcp_manager.call_tool') as mock_call_tool, \
-         patch('core.chat_engine.logger.error') as mock_logger_error:
+         patch('core.chat_engine.log.error') as mock_logger_error:
         
         # 设置模拟对象
         mock_openai_instance = MagicMock()
@@ -994,7 +994,7 @@ async def test_call_mcp_service_mcp_error(mock_config):
          patch('core.chat_engine.PersonalityManager') as mock_personality_manager_class, \
          patch('core.chat_engine.ToolManager') as mock_tool_manager_class, \
          patch('core.chat_engine.mcp_manager.call_tool') as mock_call_tool, \
-         patch('core.chat_engine.logger.error') as mock_logger_error:
+         patch('core.chat_engine.log.error') as mock_logger_error:
         
         # 设置模拟对象
         mock_openai_instance = MagicMock()

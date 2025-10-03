@@ -41,8 +41,8 @@ def test_mem0_proxy_manager_init(mock_config):
         mock_openai_instance = MagicMock()
         mock_openai.return_value = mock_openai_instance
         
-        # 初始化Mem0ProxyManager
-        mem0_proxy = Mem0ProxyManager()
+        # 初始化Mem0ProxyManager，传入mock_config
+        mem0_proxy = Mem0ProxyManager(custom_config=mock_config)
         
         # 验证组件是否被正确初始化
         assert mem0_proxy.base_client == mock_mem0_instance
@@ -71,8 +71,8 @@ def test_mem0_proxy_manager_init_local(mock_config):
          patch('core.mem0_proxy.ToolManager'), \
          patch('core.mem0_proxy.OpenAI'):
         
-        # 初始化Mem0ProxyManager
-        mem0_proxy = Mem0ProxyManager()
+        # 初始化Mem0ProxyManager，传入mock_config
+        mem0_proxy = Mem0ProxyManager(custom_config=mock_config)
         
         # 验证是否使用本地配置
         # 注意：本地配置是通过Mem0类的参数来判断的，而不是is_local_client标志
@@ -90,8 +90,8 @@ def test_get_client(mock_config):
         mock_mem0_instance = MagicMock()
         mock_mem0.return_value = mock_mem0_instance
         
-        # 初始化Mem0ProxyManager
-        mem0_proxy = Mem0ProxyManager()
+        # 初始化Mem0ProxyManager，传入mock_config
+        mem0_proxy = Mem0ProxyManager(custom_config=mock_config)
         
         # 测试获取默认客户端
         client1 = mem0_proxy.get_client()
@@ -109,6 +109,8 @@ async def test_generate_response_basic(mock_config):
     # 配置mock_config
     mock_config.USE_TOOLS_DEFAULT = False
     mock_config.STREAM_DEFAULT = False
+    mock_config.MEMO_USE_LOCAL = False
+    mock_config.MEM0_API_KEY = "test_mem0_key"
     
     # 创建模拟响应
     mock_response = MagicMock()
@@ -128,13 +130,9 @@ async def test_generate_response_basic(mock_config):
          patch('core.mem0_proxy.ToolManager'), \
          patch('core.mem0_proxy.Mem0ProxyManager._handle_non_streaming_response') as mock_handle_non_streaming:
         
-        # 创建模拟对象
+        # 创建模拟对象 - 确保模拟结构与实际Mem0客户端匹配
         mock_mock_client = MagicMock()
-        mock_mock_chat = MagicMock()
-        mock_mock_completions = MagicMock()
-        mock_mock_completions.create.return_value = mock_response
-        mock_mock_chat.completions.return_value = mock_mock_completions
-        mock_mock_client.chat.return_value = mock_mock_chat
+        mock_mock_client.chat.completions.create.return_value = mock_response
         mock_mem0.return_value = mock_mock_client
         
         mock_personality_manager_instance = MagicMock()
@@ -143,7 +141,7 @@ async def test_generate_response_basic(mock_config):
         
         # 设置模拟的handle_non_streaming_response返回值
         expected_result = {
-            "role": "assistant",
+            "role": "health_assistant",
             "content": "测试响应内容",
             "usage": {
                 "prompt_tokens": 100,
@@ -153,8 +151,8 @@ async def test_generate_response_basic(mock_config):
         }
         mock_handle_non_streaming.return_value = expected_result
         
-        # 初始化Mem0ProxyManager
-        mem0_proxy = Mem0ProxyManager()
+        # 初始化Mem0ProxyManager，传入mock_config
+        mem0_proxy = Mem0ProxyManager(custom_config=mock_config)
         
         # 准备测试数据
         messages = [{"role": "user", "content": "你好"}]
@@ -166,8 +164,8 @@ async def test_generate_response_basic(mock_config):
         assert result == expected_result
         
         # 验证API调用参数
-        mock_mock_completions.create.assert_called_once()
-        args, kwargs = mock_mock_completions.create.call_args
+        mock_mock_client.chat.completions.create.assert_called_once()
+        args, kwargs = mock_mock_client.chat.completions.create.call_args
         assert kwargs["messages"] == messages
         assert kwargs["stream"] is False
         
@@ -195,13 +193,9 @@ async def test_generate_response_with_personality(mock_config):
          patch('core.mem0_proxy.ToolManager'), \
          patch('core.mem0_proxy.Mem0ProxyManager._handle_non_streaming_response') as mock_handle_non_streaming:
         
-        # 创建模拟对象
+        # 创建模拟对象 - 确保模拟结构与实际Mem0客户端匹配
         mock_mock_client = MagicMock()
-        mock_mock_chat = MagicMock()
-        mock_mock_completions = MagicMock()
-        mock_mock_completions.create.return_value = mock_response
-        mock_mock_chat.completions.return_value = mock_mock_completions
-        mock_mock_client.chat.return_value = mock_mock_chat
+        mock_mock_client.chat.completions.create.return_value = mock_response
         mock_mem0.return_value = mock_mock_client
         
         # 模拟apply_personality方法
@@ -212,13 +206,13 @@ async def test_generate_response_with_personality(mock_config):
         
         # 设置模拟的handle_non_streaming_response返回值
         expected_result = {
-            "role": "assistant",
+            "role": "health_assistant",
             "content": "带人格的测试响应"
         }
         mock_handle_non_streaming.return_value = expected_result
         
-        # 初始化Mem0ProxyManager
-        mem0_proxy = Mem0ProxyManager()
+        # 初始化Mem0ProxyManager，传入mock_config
+        mem0_proxy = Mem0ProxyManager(custom_config=mock_config)
         
         # 准备测试数据
         messages = [{"role": "user", "content": "你好"}]
@@ -233,7 +227,8 @@ async def test_generate_response_with_personality(mock_config):
         mock_personality_manager_instance.apply_personality.assert_called_once_with(messages, "professional")
         
         # 验证API调用参数包含应用人格后的消息
-        args, kwargs = mock_mock_completions.create.call_args
+        mock_mock_client.chat.completions.create.assert_called_once()
+        args, kwargs = mock_mock_client.chat.completions.create.call_args
         assert kwargs["messages"] == applied_messages
         
         # 验证调用了_handle_non_streaming_response
@@ -264,13 +259,9 @@ async def test_generate_response_with_tools(mock_config):
          patch('services.tools.registry.tool_registry.get_functions_schema') as mock_get_functions_schema, \
          patch('core.mem0_proxy.Mem0ProxyManager._handle_non_streaming_response') as mock_handle_non_streaming:
         
-        # 创建模拟对象
+        # 创建模拟对象 - 确保模拟结构与实际Mem0客户端匹配
         mock_mock_client = MagicMock()
-        mock_mock_chat = MagicMock()
-        mock_mock_completions = MagicMock()
-        mock_mock_completions.create.return_value = mock_response
-        mock_mock_chat.completions.return_value = mock_mock_completions
-        mock_mock_client.chat.return_value = mock_mock_chat
+        mock_mock_client.chat.completions.create.return_value = mock_response
         mock_mem0.return_value = mock_mock_client
         
         mock_personality_manager_instance = MagicMock()
@@ -282,13 +273,13 @@ async def test_generate_response_with_tools(mock_config):
         
         # 设置模拟的handle_non_streaming_response返回值
         expected_result = {
-            "role": "assistant",
+            "role": "health_assistant",
             "content": "使用工具的测试响应"
         }
         mock_handle_non_streaming.return_value = expected_result
         
-        # 初始化Mem0ProxyManager
-        mem0_proxy = Mem0ProxyManager()
+        # 初始化Mem0ProxyManager，传入mock_config
+        mem0_proxy = Mem0ProxyManager(custom_config=mock_config)
         
         # 准备测试数据
         messages = [{"role": "user", "content": "你好"}]
@@ -300,7 +291,8 @@ async def test_generate_response_with_tools(mock_config):
         assert result == expected_result
         
         # 验证API调用参数包含工具
-        args, kwargs = mock_mock_completions.create.call_args
+        mock_mock_client.chat.completions.create.assert_called_once()
+        args, kwargs = mock_mock_client.chat.completions.create.call_args
         assert kwargs["tools"] == mock_tools
         assert kwargs["tool_choice"] == "auto"
         
@@ -374,11 +366,7 @@ async def test_fallback_to_openai(mock_config):
         # 创建模拟对象
         # 让Mem0调用失败
         mock_mock_client = MagicMock()
-        mock_mock_chat = MagicMock()
-        mock_mock_completions = MagicMock()
-        mock_mock_completions.create.side_effect = Exception("Mem0调用失败")
-        mock_mock_chat.completions.return_value = mock_mock_completions
-        mock_mock_client.chat.return_value = mock_mock_chat
+        mock_mock_client.chat.completions.create.side_effect = Exception("Mem0调用失败")
         mock_mem0.return_value = mock_mock_client
         
         # OpenAI客户端模拟
@@ -392,12 +380,12 @@ async def test_fallback_to_openai(mock_config):
         
         # 设置模拟的handle_non_streaming_response返回值
         mock_handle_non_streaming.return_value = {
-            "role": "assistant",
+            "role": "health_assistant",
             "content": "降级到OpenAI的响应"
         }
         
-        # 初始化Mem0ProxyManager
-        mem0_proxy = Mem0ProxyManager()
+        # 初始化Mem0ProxyManager，传入mock_config
+        mem0_proxy = Mem0ProxyManager(custom_config=mock_config)
         
         # 准备测试数据
         messages = [{"role": "user", "content": "你好"}]
@@ -406,7 +394,7 @@ async def test_fallback_to_openai(mock_config):
         result = await mem0_proxy.generate_response(messages)
         
         # 验证结果
-        assert result["role"] == "assistant"
+        assert result["role"] == "health_assistant"
         assert result["content"] == "降级到OpenAI的响应"
         
         # 验证调用了_handle_non_streaming_response

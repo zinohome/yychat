@@ -2,24 +2,24 @@
 from typing import Dict, Any, Optional
 import asyncio  # 添加asyncio模块导入
 from .registry import tool_registry
-from config import get_logger
-logger = get_logger(__name__)
+from utils.log import log
+
 
 class ToolManager:
     async def execute_tool(self, tool_name: str, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         tool = tool_registry.get_tool(tool_name)
         if not tool:
-            logger.warning(f"Tool {tool_name} not found")
+            log.warning(f"Tool {tool_name} not found")
             return None
         
         try:
             # 异步执行工具
-            logger.debug(f"Executing tool: {tool_name} with params: {params}")
+            log.debug(f"Executing tool: {tool_name} with params: {params}")
             result = await tool.execute(params)
-            logger.debug(f"Tool {tool_name} executed successfully. Result: {result}")
+            log.debug(f"Tool {tool_name} executed successfully. Result: {result}")
             return {"success": True, "result": result}
         except Exception as e:
-            logger.error(f"Error executing tool {tool_name}: {e}")
+            log.error(f"Error executing tool {tool_name}: {e}")
             return {"success": False, "error": str(e)}
     
     async def execute_tools_concurrently(self, tool_calls: list) -> list:

@@ -4,10 +4,10 @@ import threading
 from mem0 import Memory, AsyncMemory
 from mem0.configs.base import MemoryConfig
 from config.config import get_config
-from config.log_config import get_logger
+from utils.log import log
 import asyncio
 
-logger = get_logger(__name__)
+
 
 class ChatMemory:
     def __init__(self, memory=None):
@@ -34,10 +34,10 @@ class ChatMemory:
                 }
             )
             
-            logger.debug(f"初始化Memory，配置: {memory_config}")
+            log.debug(f"初始化Memory，配置: {memory_config}")
             # 使用MemoryConfig对象初始化Memory
             self.memory = Memory(config=memory_config)
-            logger.debug(f"成功创建Memory实例: {self.memory}")
+            log.debug(f"成功创建Memory实例: {self.memory}")
             
             # 确保持久化目录存在
             os.makedirs(self.config.CHROMA_PERSIST_DIRECTORY, exist_ok=True)
@@ -58,7 +58,7 @@ class ChatMemory:
 
     def add_message(self, conversation_id: str, message: dict):
         try:
-            logger.debug(f"添加消息到记忆: {message}, conversation_id: {conversation_id}")
+            log.debug(f"添加消息到记忆: {message}, conversation_id: {conversation_id}")
             # 创建metadata字典，只包含非None值
             metadata = {"role": message["role"]}
             # 只有当timestamp存在且不为None时才添加
@@ -70,9 +70,9 @@ class ChatMemory:
                 user_id=conversation_id,
                 metadata=metadata
             )
-            logger.debug("消息添加成功")
+            log.debug("消息添加成功")
         except Exception as e:
-            logger.error(f"Failed to add message to memory: {e}", exc_info=True)
+            log.error(f"Failed to add message to memory: {e}", exc_info=True)
     
     def get_relevant_memory(self, conversation_id: str, query: str, limit: Optional[int] = None) -> list:
         # 如果没有提供limit，使用配置中的默认值
@@ -121,7 +121,7 @@ class ChatMemory:
             thread.join(timeout=self.config.MEMORY_RETRIEVAL_TIMEOUT)
             
             if thread.is_alive():
-                logger.warning(f"记忆检索超时（{self.config.MEMORY_RETRIEVAL_TIMEOUT}秒）")
+                log.warning(f"记忆检索超时（{self.config.MEMORY_RETRIEVAL_TIMEOUT}秒）")
                 return []
             
             if exception:
@@ -129,7 +129,7 @@ class ChatMemory:
             
             return result
         except Exception as e:
-            logger.error(f"Failed to get relevant memory: {e}")
+            log.error(f"Failed to get relevant memory: {e}")
             return []
     
     def get_all_memory(self, conversation_id: str) -> list:
@@ -156,14 +156,14 @@ class ChatMemory:
             else:
                 return []
         except Exception as e:
-            logger.error(f"Failed to get all memory: {e}")
+            log.error(f"Failed to get all memory: {e}")
             return []
     
     def delete_memory(self, conversation_id: str):
         try:
             self.memory.delete_all(user_id=conversation_id)
         except Exception as e:
-            logger.error(f"Failed to delete memory: {e}")
+            log.error(f"Failed to delete memory: {e}")
     
     # 添加缺失的 add_memory 方法
     def add_memory(self, conversation_id: str, user_message: str, assistant_message: str):
@@ -176,7 +176,7 @@ class ChatMemory:
                 metadata={"type": "conversation"}
             )
         except Exception as e:
-            logger.error(f"Failed to add memory: {e}")
+            log.error(f"Failed to add memory: {e}")
 
 # 添加异步版本的ChatMemory类
 class AsyncChatMemory:
@@ -192,10 +192,10 @@ class AsyncChatMemory:
             # 传递config参数给get_memory_config函数
             memory_config = get_memory_config(self.config)
             
-            logger.debug(f"初始化AsyncMemory，配置: {memory_config}")
+            log.debug(f"初始化AsyncMemory，配置: {memory_config}")
             # 使用MemoryConfig对象初始化AsyncMemory
             self.async_memory = AsyncMemory(config=memory_config)
-            logger.debug(f"成功创建AsyncMemory实例: {self.async_memory}")
+            log.debug(f"成功创建AsyncMemory实例: {self.async_memory}")
         else:
             # 使用提供的async_memory对象
             self.async_memory = async_memory
@@ -213,7 +213,7 @@ class AsyncChatMemory:
 
     async def add_message(self, conversation_id: str, message: dict):
         try:
-            logger.debug(f"异步添加消息到记忆: {message}, conversation_id: {conversation_id}")
+            log.debug(f"异步添加消息到记忆: {message}, conversation_id: {conversation_id}")
             # 创建metadata字典，只包含非None值
             metadata = {"role": message["role"]}
             # 只有当timestamp存在且不为None时才添加
@@ -225,9 +225,9 @@ class AsyncChatMemory:
                 user_id=conversation_id,
                 metadata=metadata
             )
-            logger.debug("异步消息添加成功")
+            log.debug("异步消息添加成功")
         except Exception as e:
-            logger.error(f"Failed to add message to async memory: {e}", exc_info=True)
+            log.error(f"Failed to add message to async memory: {e}", exc_info=True)
             # 可以选择是否抛出异常，这里选择记录错误但不中断程序
     
     # 添加缺失的get_memory_config函数
@@ -254,7 +254,7 @@ class AsyncChatMemory:
     async def add_messages_batch(self, conversation_id: str, messages: list):
         """批量添加多条消息到记忆"""
         try:
-            logger.debug(f"批量异步添加消息到记忆，消息数量: {len(messages)}, conversation_id: {conversation_id}")
+            log.debug(f"批量异步添加消息到记忆，消息数量: {len(messages)}, conversation_id: {conversation_id}")
             
             # 用于验证添加结果的消息列表
             added_messages = []
@@ -280,7 +280,7 @@ class AsyncChatMemory:
                     formatted_content += f"信息类型: 知识分享和建议\n"
                     formatted_content += f"需要记忆: 是"
                 
-                logger.debug(f"准备添加的格式化内容: {formatted_content[:100]}..., metadata: {metadata}")
+                log.debug(f"准备添加的格式化内容: {formatted_content[:100]}..., metadata: {metadata}")
                 
                 # 修复：添加await关键字等待异步方法执行
                 try:
@@ -291,12 +291,12 @@ class AsyncChatMemory:
                         metadata=metadata
                     )
                     # 改进日志记录，显示返回值的类型和内容
-                    logger.debug(f"异步添加结果类型: {type(result)}, 结果内容: {result}")
+                    log.debug(f"异步添加结果类型: {type(result)}, 结果内容: {result}")
                     
                     # 无论返回什么，只要没有异常就视为成功添加
                     added_messages.append(formatted_content)
                 except Exception as add_error:
-                    logger.error(f"添加消息时出错: {add_error}")
+                    log.error(f"添加消息时出错: {add_error}")
                     
                     # 尝试使用同步版本作为备选
                     try:
@@ -307,11 +307,11 @@ class AsyncChatMemory:
                             "timestamp": message.get("timestamp")
                         })
                         added_messages.append(formatted_content)
-                        logger.info("已使用同步版本备选添加消息")
+                        log.info("已使用同步版本备选添加消息")
                     except Exception as fallback_error:
-                        logger.error(f"备选方法也添加失败: {fallback_error}")
+                        log.error(f"备选方法也添加失败: {fallback_error}")
             
-            logger.info(f"批量异步消息添加成功，共添加{len(added_messages)}条消息")
+            log.info(f"批量异步消息添加成功，共添加{len(added_messages)}条消息")
             
             # 恢复验证步骤，但使用适当的注释而不是被注释掉的代码
             try:
@@ -321,17 +321,17 @@ class AsyncChatMemory:
                 
                 # 详细记录验证结果，特别处理字典格式的情况
                 if isinstance(verification_memories, list):
-                    logger.info(f"验证添加结果: 获取到{len(verification_memories)}条记忆")
+                    log.info(f"验证添加结果: 获取到{len(verification_memories)}条记忆")
                 elif isinstance(verification_memories, dict):
                     # 处理字典格式的返回结果
-                    logger.info(f"验证添加结果: 获取到字典格式的记忆，键: {list(verification_memories.keys())}")
+                    log.info(f"验证添加结果: 获取到字典格式的记忆，键: {list(verification_memories.keys())}")
                 else:
-                    logger.info(f"验证添加结果: 获取到未知格式的记忆: {type(verification_memories)}")
+                    log.info(f"验证添加结果: 获取到未知格式的记忆: {type(verification_memories)}")
             except Exception as e:
-                logger.warning(f"验证记忆添加结果时出错: {e}")
+                log.warning(f"验证记忆添加结果时出错: {e}")
         
         except Exception as e:
-            logger.error(f"Failed to add batch messages to async memory: {e}", exc_info=True)
+            log.error(f"Failed to add batch messages to async memory: {e}", exc_info=True)
     
     async def get_relevant_memory(self, conversation_id: str, query: str, limit: Optional[int] = None) -> list:
         # 如果没有提供limit，使用配置中的默认值
@@ -354,10 +354,10 @@ class AsyncChatMemory:
                 return [mem.get("content", str(mem)) for mem in memories]
             return []
         except asyncio.TimeoutError:
-            logger.warning(f"异步记忆检索超时（{self.config.MEMORY_RETRIEVAL_TIMEOUT}秒）")
+            log.warning(f"异步记忆检索超时（{self.config.MEMORY_RETRIEVAL_TIMEOUT}秒）")
             return []
         except Exception as e:
-            logger.error(f"Failed to get relevant async memory: {e}")
+            log.error(f"Failed to get relevant async memory: {e}")
             return []
     
     async def get_all_memory(self, conversation_id: str) -> list:
@@ -379,14 +379,14 @@ class AsyncChatMemory:
                         result.append(str(mem))
             return result
         except Exception as e:
-            logger.error(f"Failed to get all async memory: {e}")
+            log.error(f"Failed to get all async memory: {e}")
             return []
     
     async def delete_memory(self, conversation_id: str):
         try:
             await self.async_memory.delete_all(user_id=conversation_id)
         except Exception as e:
-            logger.error(f"Failed to delete async memory: {e}")
+            log.error(f"Failed to delete async memory: {e}")
 
 # 创建一个全局的AsyncChatMemory实例，方便在异步环境中使用
 def get_async_chat_memory():

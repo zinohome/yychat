@@ -15,9 +15,9 @@ Mem0 Proxy使用示例
 import asyncio
 from typing import List, Dict
 from core import get_mem0_proxy
-from config.log_config import get_logger
+from utils.log import log
 
-logger = get_logger(__name__)
+
 
 async def simple_chat_demo():
     """简单聊天演示，展示Mem0 Proxy的基本用法"""
@@ -80,7 +80,7 @@ async def simple_chat_demo():
         print("\n演示完成！请注意观察第二次回复是否考虑了用户不能吃奶酪的偏好。")
             
     except Exception as e:
-        logger.error(f"演示过程中出错: {e}")
+        log.error(f"演示过程中出错: {e}")
         print(f"演示过程中出错: {str(e)}")
 
 async def streaming_chat_demo():
@@ -143,7 +143,7 @@ async def streaming_chat_demo():
         print("\n\n流式演示完成！")
             
     except Exception as e:
-        logger.error(f"流式演示过程中出错: {e}")
+        log.error(f"流式演示过程中出错: {e}")
         print(f"流式演示过程中出错: {str(e)}")
 
 async def compare_performance_demo():
@@ -186,7 +186,7 @@ async def compare_performance_demo():
         print("\n注意：实际差异可能因网络条件、系统负载和记忆库大小而异")
         
     except Exception as e:
-        logger.error(f"性能测试过程中出错: {e}")
+        log.error(f"性能测试过程中出错: {e}")
         print(f"性能测试过程中出错: {str(e)}")
 
 async def main():

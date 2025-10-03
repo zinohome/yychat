@@ -1,14 +1,7 @@
 from dotenv import load_dotenv, find_dotenv
 import os
-import logging
 import sys
 
-# 设置基本日志配置以便在配置加载前能记录问题
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
 
 # 获取当前文件所在目录的绝对路径
 base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -25,15 +18,15 @@ try:
     # 加载.env文件，如果不存在则尝试创建
     if os.path.exists(env_file):
         load_dotenv(dotenv_path=env_file, override=True)
-        logger.debug(f"成功加载.env文件: {env_file}")
+        print(f"成功加载.env文件: {env_file}")
     else:
         # 如果.env文件不存在，可以选择创建一个默认的
-        logger.warning(f".env文件不存在: {env_file}")
+        print(f".env文件不存在: {env_file}")
         # 注意：如果要自动创建.env文件，可以取消下面的注释
         # with open(env_file, 'w') as f:
         #     f.write("# 默认环境变量配置\n")
 except Exception as e:
-    logger.error(f"加载.env文件时出错: {str(e)}")
+    print(f"加载.env文件时出错: {str(e)}")
 
 # 添加以下配置项
 # 在Config类中添加
@@ -62,10 +55,16 @@ class Config:
     
     # 日志配置
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+    LOG_FILE_NAME = os.getenv("LOG_FILE_NAME", "app.log")
     
     # 服务器配置
     SERVER_HOST = os.getenv("SERVER_HOST", "0.0.0.0")
     SERVER_PORT = int(os.getenv("SERVER_PORT", "8000"))
+    
+    # 聊天引擎配置
+    # 可选值: chat_engine, mem0_proxy
+    # 默认值: chat_engine
+    CHAT_ENGINE = os.getenv("CHAT_ENGINE", "chat_engine")
     
     # 默认人格配置
     DEFAULT_PERSONALITY = os.getenv("DEFAULT_PERSONALITY", "health_assistant")

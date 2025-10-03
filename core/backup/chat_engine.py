@@ -6,7 +6,7 @@ import openai
 from openai import OpenAI
 # 修改导入路径
 from config.config import get_config
-from config.log_config import get_logger
+from utils.log import log
 from core.chat_memory import ChatMemory, get_async_chat_memory
 from core.personality_manager import PersonalityManager
 from services.tools.manager import ToolManager
@@ -20,7 +20,7 @@ from openai.types.chat.chat_completion_message_function_tool_call import ChatCom
 from services.mcp.exceptions import MCPServiceError, MCPServerNotFoundError, MCPToolNotFoundError
 
 
-logger = get_logger(__name__)
+
 config = get_config()
 
 class ChatEngine:
@@ -63,27 +63,27 @@ class ChatEngine:
         total_start_time = time.time()
         try:
             # 打印传入的参数值，用于调试
-            logger.debug(f"传入参数 - personality_id: {personality_id}, use_tools: {use_tools}, stream: {stream}, type(personality_id): {type(personality_id)}, type(use_tools): {type(use_tools)}, type(stream): {type(stream)}")
+            log.debug(f"传入参数 - personality_id: {personality_id}, use_tools: {use_tools}, stream: {stream}, type(personality_id): {type(personality_id)}, type(use_tools): {type(use_tools)}, type(stream): {type(stream)}")
             
             # 创建messages的深拷贝，避免修改原始列表
             messages_copy = [msg.copy() for msg in messages]
             
-            logger.debug(f"原始消息: {messages_copy}")
+            log.debug(f"原始消息: {messages_copy}")
             
             # 如果没有指定人格ID，使用默认人格
             if personality_id is None:
                 personality_id = config.DEFAULT_PERSONALITY
-                logger.info(f"未指定人格ID，使用默认人格: {personality_id}")
+                log.info(f"未指定人格ID，使用默认人格: {personality_id}")
             
             # 如果没有指定use_tools，使用默认值
             if use_tools is None:
                 use_tools = config.USE_TOOLS_DEFAULT
-                logger.info(f"未指定use_tools，使用默认值: {use_tools}")
+                log.info(f"未指定use_tools，使用默认值: {use_tools}")
             
             # 如果没有指定stream，使用默认值
             if stream is None:
                 stream = config.STREAM_DEFAULT
-                logger.info(f"未指定stream，使用默认值: {stream}")
+                log.info(f"未指定stream，使用默认值: {stream}")
             
             # 首先从记忆中检索相关内容 - 修改为使用异步版本
             if conversation_id != "default" and messages_copy:
@@ -109,10 +109,10 @@ class ChatEngine:
                     if estimated_memory_tokens + estimated_user_tokens < max_tokens * safety_margin:
                         # 将记忆添加到消息列表开头
                         messages_copy = [{"role": "system", "content": memory_section}] + messages_copy
-                        logger.debug(f"添加了记忆到系统提示，估算token数: {estimated_memory_tokens}")
+                        log.debug(f"添加了记忆到系统提示，估算token数: {estimated_memory_tokens}")
                     else:
                         # 如果记忆太多，选择不添加
-                        logger.warning(f"避免超出模型token限制，不添加记忆到系统提示。\n估算记忆token: {estimated_memory_tokens}, 用户消息token: {estimated_user_tokens}, 限制: {max_tokens * safety_margin}")
+                        log.warning(f"避免超出模型token限制，不添加记忆到系统提示。\n估算记忆token: {estimated_memory_tokens}, 用户消息token: {estimated_user_tokens}, 限制: {max_tokens * safety_margin}")
             # 初始化allowed_tool_names为None
             allowed_tool_names = None
             
@@ -120,14 +120,14 @@ class ChatEngine:
             if personality_id:
                 try:
                     messages_copy = self.personality_manager.apply_personality(messages_copy, personality_id)
-                    logger.debug(f"应用人格后消息: {messages_copy}")
+                    log.debug(f"应用人格后消息: {messages_copy}")
                     
                     # 获取人格的allowed_tools信息，用于工具过滤
                     personality = self.personality_manager.get_personality(personality_id)
                     if personality and personality.allowed_tools:
                         allowed_tool_names = [tool["tool_name"] for tool in personality.allowed_tools]
                 except Exception as e:
-                    logger.warning(f"应用人格时出错，忽略人格设置: {e}")
+                    log.warning(f"应用人格时出错，忽略人格设置: {e}")
             
             # 构建请求参数
             request_params = {
@@ -140,8 +140,8 @@ class ChatEngine:
             if use_tools:
                 # 获取所有注册的工具schema
                 all_tools_schema = tool_registry.get_functions_schema()
-                logger.debug(f"原始工具数量: {len(all_tools_schema)}")
-                logger.debug(f"允许的工具名称: {allowed_tool_names}")
+                log.debug(f"原始工具数量: {len(all_tools_schema)}")
+                log.debug(f"允许的工具名称: {allowed_tool_names}")
                 
                 # 如果有allowed_tools配置，则进行过滤
                 if allowed_tool_names:
@@ -151,11 +151,11 @@ class ChatEngine:
                         tool_name = tool.get("function", {}).get("name")
                         if tool_name in allowed_tool_names:
                             tools_schema.append(tool)
-                    logger.info(f"已根据人格配置过滤工具，剩余工具数量: {len(tools_schema)}")
+                    log.info(f"已根据人格配置过滤工具，剩余工具数量: {len(tools_schema)}")
                 else:
                     # 如果没有allowed_tools配置，则使用所有工具
                     tools_schema = all_tools_schema
-                    logger.info(f"未设置人格工具过滤，使用所有工具，工具数量: {len(tools_schema)}")
+                    log.info(f"未设置人格工具过滤，使用所有工具，工具数量: {len(tools_schema)}")
                 if tools_schema:
                     request_params["tools"] = tools_schema
                     
@@ -165,24 +165,24 @@ class ChatEngine:
                         # 只有当gettime工具在allowed_tools中时才强制使用
                         if not allowed_tool_names or "gettime" in allowed_tool_names:
                             request_params["tool_choice"] = {"type": "function", "function": {"name": "gettime"}}
-                            logger.info("检测到时间相关问题，强制使用gettime工具")
+                            log.info("检测到时间相关问题，强制使用gettime工具")
                         else:
-                            logger.info("检测到时间相关问题，但gettime工具不在允许使用的工具列表中")
+                            log.info("检测到时间相关问题，但gettime工具不在允许使用的工具列表中")
                 else:
-                    logger.warning("未找到允许使用的工具，无法添加工具schema到请求参数")
+                    log.warning("未找到允许使用的工具，无法添加工具schema到请求参数")
             else:
-                logger.debug("工具调用已禁用")
+                log.debug("工具调用已禁用")
             
-            logger.debug(f"最终请求参数: {request_params}")
+            log.debug(f"最终请求参数: {request_params}")
             # 记录总请求处理时间
-            logger.debug(f"总请求处理时间一: {time.time() - total_start_time:.2f}秒")
+            log.debug(f"总请求处理时间一: {time.time() - total_start_time:.2f}秒")
             if stream:
                 # 直接返回异步生成器方法调用
                 return self._generate_streaming_response(request_params, conversation_id, messages)
             else:
                 return await self._generate_non_streaming_response(request_params, conversation_id, messages)
         except Exception as e:
-            logger.error(f"Error in generate_response: {e}")
+            log.error(f"Error in generate_response: {e}")
             # 返回适当的错误响应对象，而不是简单的错误字典
             if stream:
                 # 对于流式响应，返回一个可以异步迭代的对象
@@ -207,11 +207,11 @@ class ChatEngine:
         try:
             # 调用OpenAI API
             response = self.client.chat.completions.create(**request_params)
-            logger.debug(f"OpenAI API响应: {response}")
+            log.debug(f"OpenAI API响应: {response}")
             
             # 增加响应格式验证
             if not hasattr(response, 'choices') or not response.choices:
-                logger.error(f"Invalid API response format: {dir(response)}")
+                log.error(f"Invalid API response format: {dir(response)}")
                 return {"role": "assistant", "content": "获取AI响应时发生格式错误，请检查API配置。"}
             
             # 处理响应
@@ -225,7 +225,7 @@ class ChatEngine:
             else:
                 # 确保content存在
                 if not hasattr(response.choices[0].message, 'content') or response.choices[0].message.content is None:
-                    logger.error(f"Response missing content: {response}")
+                    log.error(f"Response missing content: {response}")
                     return {"role": "assistant", "content": "AI响应内容为空，请检查API配置。"}
                 
                 # 普通响应
@@ -251,10 +251,10 @@ class ChatEngine:
                 }
                 
         except json.JSONDecodeError as e:
-            logger.error(f"JSON解析错误: {e}. 请检查API端点是否正确且返回有效JSON格式。")
+            log.error(f"JSON解析错误: {e}. 请检查API端点是否正确且返回有效JSON格式。")
             return {"role": "assistant", "content": "API返回内容格式错误，请确认API端点配置正确。"}
         except Exception as e:
-            logger.error(f"生成响应时出错: {e}")
+            log.error(f"生成响应时出错: {e}")
             # 尝试获取更详细的错误信息
             detailed_error = str(e)
             if hasattr(e, 'response') and hasattr(e.response, 'text'):
@@ -274,7 +274,7 @@ class ChatEngine:
             
             # 使用异步方式调用API（如果OpenAI客户端支持）
             response = self.client.chat.completions.create(**request_params)
-            logger.debug(f"OpenAI API调用耗时: {time.time() - api_start_time:.2f}秒")
+            log.debug(f"OpenAI API调用耗时: {time.time() - api_start_time:.2f}秒")
             
             # 初始化变量
             tool_calls = None
@@ -287,7 +287,7 @@ class ChatEngine:
                 chunk_count += 1
                 if chunk_count == 1:
                     first_chunk_time = time.time()
-                    logger.debug(f"首字节响应时间: {first_chunk_time - api_start_time:.2f}秒")
+                    log.debug(f"首字节响应时间: {first_chunk_time - api_start_time:.2f}秒")
                     
                 if chunk.choices and len(chunk.choices) > 0:
                     choice = chunk.choices[0]
@@ -410,9 +410,9 @@ class ChatEngine:
                     "finish_reason": "stop",
                     "stream": True
                 }
-            logger.debug(f"总块数: {chunk_count}, 总处理时间: {time.time() - api_start_time:.2f}秒")
+            log.debug(f"总块数: {chunk_count}, 总处理时间: {time.time() - api_start_time:.2f}秒")
         except Exception as e:
-            logger.error(f"Error generating streaming response: {e}")
+            log.error(f"Error generating streaming response: {e}")
             yield {
                 "role": "assistant",
                 "content": f"抱歉，我现在无法为您提供帮助。错误信息: {str(e)}",
@@ -476,7 +476,7 @@ class ChatEngine:
                     raise ValueError("Either 'tool_name' or both 'service_name' and 'method_name' must be provided")
                 tool_name = f"{service_name}__{method_name}"
             
-            logger.info(f"Calling MCP service: {tool_name}, params: {params}, server: {mcp_server or 'auto'}")
+            log.info(f"Calling MCP service: {tool_name}, params: {params}, server: {mcp_server or 'auto'}")
             
             # 使用MCP管理器调用服务，支持指定服务器
             result = mcp_manager.call_tool(tool_name, params, mcp_server)
@@ -495,16 +495,16 @@ class ChatEngine:
             
             return {"success": True, "result": response_text, "raw_result": result}
         except MCPServerNotFoundError as e:
-            logger.error(f"MCP server error: {str(e)}")
+            log.error(f"MCP server error: {str(e)}")
             return {"success": False, "error": f"MCP服务器错误: {str(e)}"}
         except MCPToolNotFoundError as e:
-            logger.error(f"MCP tool error: {str(e)}")
+            log.error(f"MCP tool error: {str(e)}")
             return {"success": False, "error": f"MCP工具错误: {str(e)}"}
         except MCPServiceError as e:
-            logger.error(f"MCP service error: {str(e)}")
+            log.error(f"MCP service error: {str(e)}")
             return {"success": False, "error": f"MCP服务调用失败: {str(e)}"}
         except Exception as e:
-            logger.error(f"Unexpected error when calling MCP service: {str(e)}")
+            log.error(f"Unexpected error when calling MCP service: {str(e)}")
             return {"success": False, "error": f"调用MCP服务时发生未知错误: {str(e)}"}
 
     # 清除会话记忆
@@ -517,10 +517,10 @@ class ChatEngine:
         try:
             # 直接使用同步版本的chat_memory实例获取记忆
             memories = self.chat_memory.get_all_memory(conversation_id)
-            logger.debug(f"Successfully retrieved {len(memories)} memories for conversation {conversation_id}")
+            log.debug(f"Successfully retrieved {len(memories)} memories for conversation {conversation_id}")
             return memories
         except Exception as e:
-            logger.error(f"Failed to get conversation memory: {e}")
+            log.error(f"Failed to get conversation memory: {e}")
             return []
 
     # 获取会话记忆 - 异步版本
@@ -530,7 +530,7 @@ class ChatEngine:
             # 直接调用异步记忆实例的方法
             return await self.async_chat_memory.get_all_memory(conversation_id)
         except Exception as e:
-            logger.error(f"异步获取会话记忆时出错: {e}")
+            log.error(f"异步获取会话记忆时出错: {e}")
             return []
 
     # 异步保存消息到记忆 - 使用原生异步API
@@ -552,24 +552,24 @@ class ChatEngine:
             else:
                 # 默认保存所有消息
                 messages_to_save = messages
-                logger.warning(f"未知的MEMORY_SAVE_MODE配置值: {config.MEMORY_SAVE_MODE}，默认保存所有消息")
+                log.warning(f"未知的MEMORY_SAVE_MODE配置值: {config.MEMORY_SAVE_MODE}，默认保存所有消息")
             
             if messages_to_save:
-                logger.debug(f"使用原生异步API保存消息到记忆: 模式={config.MEMORY_SAVE_MODE}, 消息数量={len(messages_to_save)}, conversation_id={conversation_id}")
+                log.debug(f"使用原生异步API保存消息到记忆: 模式={config.MEMORY_SAVE_MODE}, 消息数量={len(messages_to_save)}, conversation_id={conversation_id}")
                 
                 # 记录将要保存的消息内容（为了避免日志过大，可以只记录第一条和最后一条）
                 if len(messages_to_save) > 0:
-                    logger.debug(f"第一条消息内容预览: {messages_to_save[0].get('content', '')[:100]}...")
+                    log.debug(f"第一条消息内容预览: {messages_to_save[0].get('content', '')[:100]}...")
                     if len(messages_to_save) > 1:
-                        logger.debug(f"最后一条消息内容预览: {messages_to_save[-1].get('content', '')[:100]}...")
+                        log.debug(f"最后一条消息内容预览: {messages_to_save[-1].get('content', '')[:100]}...")
                 
                 # 批量保存消息
                 await self.async_chat_memory.add_messages_batch(conversation_id, messages_to_save)
-                logger.debug("使用原生异步API保存消息到记忆完成")
+                log.debug("使用原生异步API保存消息到记忆完成")
             else:
-                logger.debug(f"根据配置 MEMORY_SAVE_MODE={config.MEMORY_SAVE_MODE}，没有消息需要保存到记忆")
+                log.debug(f"根据配置 MEMORY_SAVE_MODE={config.MEMORY_SAVE_MODE}，没有消息需要保存到记忆")
         except Exception as e:
-            logger.error(f"使用原生异步API保存消息到记忆失败: {e}", exc_info=True)
+            log.error(f"使用原生异步API保存消息到记忆失败: {e}", exc_info=True)
 
     # 保留原有的_save_message_to_memory_async方法以保持向后兼容
     async def _save_message_to_memory_async(self, conversation_id: str, message: dict):
@@ -578,7 +578,7 @@ class ChatEngine:
             # 直接调用新的异步方法
             await self._async_save_message_to_memory(conversation_id, [message])
         except Exception as e:
-            logger.error(f"异步保存消息到记忆失败: {e}")
+            log.error(f"异步保存消息到记忆失败: {e}")
 
 
 # 创建全局聊天引擎实例

@@ -8,8 +8,7 @@ from typing import List, Dict, Any, Optional, Union
 import uvicorn
 # 修改导入路径
 from config.config import get_config
-from config.log_config import get_logger
-from core.chat_engine import chat_engine
+from utils.log import log
 from core.chat_memory import get_async_chat_memory
 from core.personality_manager import PersonalityManager
 from services.tools.registry import tool_registry
@@ -32,8 +31,19 @@ from schemas.api_schemas import (
 )
 
 
-logger = get_logger(__name__)
+
 config = get_config()
+
+# 根据配置选择使用的聊天引擎
+if config.CHAT_ENGINE == "mem0_proxy":
+    from core.mem0_proxy import Mem0ProxyManager
+    # 初始化Mem0ProxyManager
+    chat_engine = Mem0ProxyManager()
+    log.info("Using Mem0 Proxy as chat engine")
+else:
+    # 默认使用chat_engine
+    from core.chat_engine import chat_engine
+    log.info("Using default Chat Engine")
 
 # 创建HTTPBearer安全方案
 bearer_scheme = HTTPBearer()
@@ -93,18 +103,18 @@ async def startup_event():
     """应用启动时执行的初始化操作"""
     # 自动发现并注册所有工具
     registered_count = ToolDiscoverer.register_discovered_tools()
-    logger.debug(f"自动注册了 {registered_count} 个工具")
+    log.debug(f"自动注册了 {registered_count} 个工具")
     
     # 初始化并注册MCP工具
     try:
         discover_and_register_mcp_tools()
     except Exception as e:
-        logger.error(f"Failed to initialize MCP tools: {str(e)}")
+        log.error(f"Failed to initialize MCP tools: {str(e)}")
 
 # 自定义异常处理
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    logger.error(f"API Error: {exc}", exc_info=True)
+    log.error(f"API Error: {exc}", exc_info=True)
     return {
         "error": {
             "message": "处理您的请求时发生错误",
@@ -119,9 +129,9 @@ async def global_exception_handler(request: Request, exc: Exception):
 async def create_chat_completion(request: ChatCompletionRequest, api_key: str = Depends(verify_api_key)):
     try:
         # 打印完整的request内容，用于调试conversation_id问题
-        logger.debug(f"完整的请求内容: {request.model_dump()}")
-        logger.debug(f"request.conversation_id: {request.conversation_id}, type: {type(request.conversation_id)}")
-        logger.debug(f"request.user: {request.user}, type: {type(request.user)}")
+        log.debug(f"完整的请求内容: {request.model_dump()}")
+        log.debug(f"request.conversation_id: {request.conversation_id}, type: {type(request.conversation_id)}")
+        log.debug(f"request.user: {request.user}, type: {type(request.user)}")
         
         # 验证conversation_id，如果没有则使用user作为会话标识
         conversation_id = request.conversation_id or request.user
@@ -129,10 +139,10 @@ async def create_chat_completion(request: ChatCompletionRequest, api_key: str = 
         # 如果仍然没有有效的conversation_id，设置一个默认值
         if not conversation_id:
             conversation_id = "default_conversation"
-            logger.warning(f"未提供有效的conversation_id和user，使用默认值: {conversation_id}")
+            log.warning(f"未提供有效的conversation_id和user，使用默认值: {conversation_id}")
             
         # 记录请求日志
-        logger.debug(f"Chat completion request: model={request.model}, conversation_id={conversation_id}")
+        log.debug(f"Chat completion request: model={request.model}, conversation_id={conversation_id}")
         
         if request.stream:
             # 流式响应处理
@@ -163,7 +173,7 @@ async def create_chat_completion(request: ChatCompletionRequest, api_key: str = 
                             if chunk["finish_reason"] is not None:
                                 break
                 except Exception as e:
-                    logger.error(f"Error in stream generator: {e}")
+                    log.error(f"Error in stream generator: {e}")
                     # 发送错误消息
                     error_message = f"发生错误: {str(e)}"
                     error_data = {
@@ -208,10 +218,10 @@ async def create_chat_completion(request: ChatCompletionRequest, api_key: str = 
             return result
             
     except ValidationError as e:
-        logger.error(f"Validation error: {e}")
+        log.error(f"Validation error: {e}")
         raise HTTPException(status_code=400, detail={"error": {"message": str(e), "type": "validation_error"}})
     except Exception as e:
-        logger.error(f"Chat completion error: {e}", exc_info=True)
+        log.error(f"Chat completion error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail={"error": {"message": str(e), "type": "server_error"}})
 
 # 模型列表API
@@ -325,7 +335,7 @@ async def call_mcp_service(request: MCPServiceCallRequest, api_key: str = Depend
         # 重新抛出HTTP异常，避免重复记录日志
         raise
     except Exception as e:
-        logger.error(f"MCP service call error: {e}")
+        log.error(f"MCP service call error: {e}")
         raise HTTPException(status_code=500, detail={"error": {"message": str(e), "type": "server_error"}})
         
 # 根路径API - 可以不需要认证
@@ -359,7 +369,7 @@ async def list_available_tools(api_key: str = Depends(verify_api_key)):
             } for tool in non_mcp_tools.values()]
         }
     except Exception as e:
-        logger.error(f"Failed to list tools: {str(e)}")
+        log.error(f"Failed to list tools: {str(e)}")
         raise HTTPException(status_code=500, detail={"error": {"message": str(e), "type": "server_error"}})
 
 # 列出所有MCP工具
@@ -375,7 +385,7 @@ async def list_available_mcp_tools(api_key: str = Depends(verify_api_key)):
             "tools": [{k: v for k, v in tool.items() if k in ["name", "description"]} for tool in mcp_tools]
         }
     except Exception as e:
-        logger.error(f"Failed to list MCP tools: {str(e)}")
+        log.error(f"Failed to list MCP tools: {str(e)}")
         raise HTTPException(status_code=500, detail={"error": {"message": str(e), "type": "mcp_service_error"}})
 
 # 工具调用API - 用于调用非MCP工具
@@ -391,7 +401,7 @@ async def call_tool(request: ToolCallRequest, api_key: str = Depends(verify_api_
             raise HTTPException(status_code=400, detail={"error": {"message": "Missing tool_name", "type": "validation_error"}})
         
         # 调用工具
-        logger.debug(f"Calling tool: {tool_name} with params: {params}")
+        log.debug(f"Calling tool: {tool_name} with params: {params}")
         result = await tool_manager.execute_tool(tool_name, params)
         
         # 格式化返回结果
@@ -400,7 +410,7 @@ async def call_tool(request: ToolCallRequest, api_key: str = Depends(verify_api_
             "result": result
         }
     except Exception as e:
-        logger.error(f"Tool call error: {e}")
+        log.error(f"Tool call error: {e}")
         raise HTTPException(status_code=500, detail={"error": {"message": str(e), "type": "server_error"}})
 
 # 启动服务器

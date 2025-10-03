@@ -1,10 +1,10 @@
 import json
-import logging
+from utils.log import log
 from typing import Optional, Dict, Any
 
 from config.config import get_config
 
-logger = logging.getLogger(__name__)
+
 
 
 class MCPConfig:
@@ -20,7 +20,7 @@ class MCPConfig:
         try:
             self.servers_config = json.loads(config.MCP_SERVERS_CONFIG) if config.MCP_SERVERS_CONFIG else None
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse MCP servers config: {str(e)}")
+            log.error(f"Failed to parse MCP servers config: {str(e)}")
             self.servers_config = None
 
 
