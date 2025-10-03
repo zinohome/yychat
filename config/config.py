@@ -51,6 +51,7 @@ class Config:
     
     # Mem0配置
     MEM0_API_KEY = os.getenv("MEM0_API_KEY")
+    MEMO_USE_LOCAL = os.getenv("MEMO_USE_LOCAL", "false").lower() == "true"
     MEM0_LLM_PROVIDER = os.getenv("MEM0_LLM_PROVIDER", "openai")
     MEM0_LLM_CONFIG_MODEL = os.getenv("MEM0_LLM_CONFIG_MODEL", "gpt-4.1")
     MEM0_LLM_CONFIG_MAX_TOKENS = int(os.getenv("MEM0_LLM_CONFIG_MAX_TOKENS", "32768"))
