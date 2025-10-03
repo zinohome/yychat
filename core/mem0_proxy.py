@@ -161,9 +161,19 @@ class Mem0ProxyManager:
             messages_copy = messages.copy()
             
             # 应用人格
+            allowed_tool_names = None
             if personality_id:
                 messages_copy = self.personality_manager.apply_personality(messages_copy, personality_id)
                 log.debug(f"Applied personality: {personality_id}")
+                
+                # 获取人格的allowed_tools信息，用于工具过滤
+                try:
+                    personality = self.personality_manager.get_personality(personality_id)
+                    if personality and personality.allowed_tools:
+                        allowed_tool_names = [tool["tool_name"] for tool in personality.allowed_tools]
+                        log.debug(f"Allowed tools for personality {personality_id}: {allowed_tool_names}")
+                except Exception as e:
+                    log.warning(f"获取人格工具配置时出错: {e}")
             
             # 准备调用参数
             call_params = {
@@ -179,10 +189,38 @@ class Mem0ProxyManager:
             if use_tools:
                 # 使用tool_registry获取工具的函数调用模式
                 from services.tools.registry import tool_registry
-                tools = tool_registry.get_functions_schema()
+                all_tools_schema = tool_registry.get_functions_schema()
+                log.debug(f"原始工具数量: {len(all_tools_schema)}")
+                log.debug(f"允许的工具名称: {allowed_tool_names}")
+                
+                # 根据allowed_tool_names过滤工具
+                if allowed_tool_names:
+                    # 只保留allowed_tools中列出的工具
+                    tools = []
+                    for tool in all_tools_schema:
+                        tool_name = tool.get("function", {}).get("name")
+                        if tool_name in allowed_tool_names:
+                            tools.append(tool)
+                    log.info(f"已根据人格配置过滤工具，剩余工具数量: {len(tools)}")
+                else:
+                    # 如果没有allowed_tools配置，则使用所有工具
+                    tools = all_tools_schema
+                    log.info(f"未设置人格工具过滤，使用所有工具，工具数量: {len(tools)}")
+                
                 if tools:
                     call_params["tools"] = tools
                     call_params["tool_choice"] = "auto"
+                    
+                    # 对于时间相关问题，强制使用工具
+                    last_message = messages_copy[-1]["content"].lower() if messages_copy else ""
+                    if any(keyword in last_message for keyword in ["几点", "时间", "现在", "几点钟", "时刻"]):
+                        # 只有当gettime工具在allowed_tools中时才强制使用
+                        if not allowed_tool_names or "gettime" in allowed_tool_names:
+                            call_params["tool_choice"] = {"type": "function", "function": {"name": "gettime"}}
+                            log.info("检测到时间相关问题，强制使用gettime工具")
+                        else:
+                            log.info("检测到时间相关问题，但gettime工具不在允许使用的工具列表中")
+                    
                     log.debug(f"Added {len(tools)} tools to the request")
             
             # 获取客户端

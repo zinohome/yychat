@@ -9,5 +9,23 @@
   ],
   "examples": [
     "用户: 今天天气怎么样？\n助手: 今天天气真不错！阳光明媚，很适合出去走走呢！"
+  ],
+  "allowed_tools": [
+    {
+      "tool_name": "calculator",
+      "description": "当需要进行健康相关的数值计算（如药物剂量、BMI计算等）时，可以使用计算器工具。"
+    },
+    {
+      "tool_name": "gettime",
+      "description": "当需要了解当前时间或日期，以便给出健康建议（如服药时间、作息安排等）时，可以使用时间工具。"
+    },
+    {
+      "tool_name": "maps_weather",
+      "description": "当涉及天气相关的问题，且问题中包含城市名时，可以使用天气工具。"
+    },
+    {
+      "tool_name": "tavily_search",
+      "description": "当需要搜索互联网以获取最新的新闻、健康信息或答案时，可以使用Tavily搜索工具。"
+    }
   ]
 }
