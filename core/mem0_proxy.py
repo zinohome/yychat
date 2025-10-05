@@ -119,17 +119,26 @@ class Mem0ProxyManager:
     def _create_mock_client(self):
         """创建一个模拟客户端用于降级处理"""
         class MockMem0Client:
+            @property
             def chat(self):
                 class MockChat:
+                    @property
                     def completions(self):
                         class MockCompletions:
                             def create(self, **kwargs):
                                 # 直接调用OpenAI API作为降级方案
+                                # 过滤掉OpenAI API不支持的参数
+                                openai_kwargs = kwargs.copy()
+                                if 'user_id' in openai_kwargs:
+                                    del openai_kwargs['user_id']
+                                if 'limit' in openai_kwargs:
+                                    del openai_kwargs['limit']
+                                
                                 client = OpenAI(
                                     api_key=config.OPENAI_API_KEY,
                                     base_url=config.OPENAI_BASE_URL
                                 )
-                                return client.chat.completions.create(**kwargs)
+                                return client.chat.completions.create(**openai_kwargs)
                         return MockCompletions()
                 return MockChat()
         return MockMem0Client()
@@ -179,8 +188,14 @@ class Mem0ProxyManager:
                 if personality_id:
                     personality = self.personality_manager.get_personality(personality_id)
                     if personality and personality.allowed_tools:
-                        # 获取personality允许使用的工具名称列表
-                        allowed_tool_names = [tool['name'] for tool in personality.allowed_tools if 'name' in tool]
+                        # 获取personality允许使用的工具名称列表，同时支持name和tool_name两种格式
+                        allowed_tool_names = []
+                        for tool in personality.allowed_tools:
+                            if 'name' in tool:
+                                allowed_tool_names.append(tool['name'])
+                            elif 'tool_name' in tool:
+                                allowed_tool_names.append(tool['tool_name'])
+                        
                         if allowed_tool_names:
                             # 根据allowed_tools过滤工具列表
                             filtered_tools = [tool for tool in all_tools if tool.get('function', {}).get('name') in allowed_tool_names]
