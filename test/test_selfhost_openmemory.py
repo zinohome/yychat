@@ -45,8 +45,9 @@ class TestSelfhostOpenMemory:
             # 创建一个新的HTTP客户端进行自定义验证
             client = httpx.Client(
                 base_url=config.MEM0_BASE_URL,
+                # 在test_validate_api_key_custom方法中
                 headers={
-                    "Authorization": f"Token {config.MEM0_API_KEY}",
+                    "Authorization": f"Bearer {config.MEM0_API_KEY}",  # 将Token改为Bearer
                     "Mem0-User-ID": self.user_id
                 },
                 timeout=30
@@ -205,10 +206,11 @@ if __name__ == "__main__":
         print("\n执行API密钥验证...")
         client = httpx.Client(
             base_url=config.MEM0_BASE_URL,
-            headers={
-                "Authorization": f"Token {config.MEM0_API_KEY}",
-                "Mem0-User-ID": "yyassistant"
-            }
+            # 在主程序演示部分
+                headers={
+                    "Authorization": f"Bearer {config.MEM0_API_KEY}",  # 将Token改为Bearer
+                    "Mem0-User-ID": "yyassistant"
+                }
         )
         response = client.get("/api/v1/auth/me")
         response.raise_for_status()

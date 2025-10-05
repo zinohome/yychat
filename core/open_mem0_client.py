@@ -68,7 +68,7 @@ class OpenMemoryClient(MemoryClient):
             self.client.base_url = httpx.URL(self.host)
             self.client.headers.update(
                 {
-                    "Authorization": f"Token {self.api_key}",
+                    "Authorization": f"Bearer {self.api_key}",  # 将Token改为Bearer
                     "Mem0-User-ID": self.user_id,
                 }
             )
@@ -76,7 +76,7 @@ class OpenMemoryClient(MemoryClient):
             self.client = httpx.Client(
                 base_url=self.host,
                 headers={
-                    "Authorization": f"Token {self.api_key}",
+                    "Authorization": f"Bearer {self.api_key}",  # 将Token改为Bearer
                     "Mem0-User-ID": self.user_id,
                 },
                 timeout=300,
@@ -206,7 +206,7 @@ class AsyncOpenMemoryClient(AsyncMemoryClient):
             self.async_client.base_url = httpx.URL(self.host)
             self.async_client.headers.update(
                 {
-                    "Authorization": f"Token {self.api_key}",
+                    "Authorization": f"Bearer {self.api_key}",  # 将Token改为Bearer
                     "Mem0-User-ID": self.user_id,
                 }
             )
@@ -214,14 +214,16 @@ class AsyncOpenMemoryClient(AsyncMemoryClient):
             self.async_client = httpx.AsyncClient(
                 base_url=self.host,
                 headers={
-                    "Authorization": f"Token {self.api_key}",
+                    "Authorization": f"Bearer {self.api_key}",  # 将Token改为Bearer
                     "Mem0-User-ID": self.user_id,
                 },
                 timeout=300,
             )
         
-        # 使用我们自己的验证方法
-        self.user_email = self._validate_api_key()
+        # 在异步环境中，我们需要手动调用异步验证方法
+        # 但由于__init__不能是异步的，我们在这里设置默认值
+        # 实际验证应在首次使用时异步进行
+        self.user_email = self.DEFAULT_USER_EMAIL
 
         # 初始化项目管理器
         self.project = AsyncProject(
@@ -233,8 +235,8 @@ class AsyncOpenMemoryClient(AsyncMemoryClient):
 
         capture_client_event("client.init", self, {"sync_type": "async"})
 
-    def _validate_api_key(self):
-        """验证API密钥，适配本地openmemory服务器
+    async def _async_validate_api_key(self):
+        """异步验证API密钥，适配本地openmemory服务器
 
         访问/api/v1/auth/me端点，验证返回结果的user_id是否和用户ID相同。
         如果相同，则将默认email赋值给用户。
@@ -243,15 +245,8 @@ class AsyncOpenMemoryClient(AsyncMemoryClient):
             str: 用户邮箱地址
         """
         try:
-            # 注意：在异步客户端中使用同步请求来验证API密钥
-            # 这是为了保持与父类行为一致
-            response = requests.get(
-                f"{self.host}/api/v1/auth/me",
-                headers={
-                    "Authorization": f"Token {self.api_key}",
-                    "Mem0-User-ID": self.user_id,
-                }
-            )
+            # 访问本地服务器的认证端点，使用异步请求
+            response = await self.async_client.get("/api/v1/auth/me")
             response.raise_for_status()
             
             data = response.json()
@@ -260,10 +255,11 @@ class AsyncOpenMemoryClient(AsyncMemoryClient):
             if data.get("user_id") != self.user_id:
                 logger.warning(f"User ID mismatch: expected {self.user_id}, got {data.get('user_id')}")
             
-            # 不管怎样都返回默认邮箱
-            return self.DEFAULT_USER_EMAIL
+            # 更新用户邮箱
+            self.user_email = self.DEFAULT_USER_EMAIL
+            return self.user_email
             
-        except requests.exceptions.HTTPError as e:
+        except httpx.HTTPStatusError as e:
             try:
                 error_data = e.response.json()
                 error_message = error_data.get("detail", str(e))
@@ -271,11 +267,24 @@ class AsyncOpenMemoryClient(AsyncMemoryClient):
                 error_message = str(e)
             logger.error(f"API key validation failed: {error_message}")
             # 即使验证失败，也返回默认邮箱以便继续使用
-            return self.DEFAULT_USER_EMAIL
+            self.user_email = self.DEFAULT_USER_EMAIL
+            return self.user_email
         except Exception as e:
             logger.error(f"Unexpected error during API key validation: {str(e)}")
             # 发生任何异常都返回默认邮箱
-            return self.DEFAULT_USER_EMAIL
+            self.user_email = self.DEFAULT_USER_EMAIL
+            return self.user_email
+
+    # 重写同步的_validate_api_key方法，返回默认值
+    def _validate_api_key(self):
+        """同步验证API密钥的兼容方法
+
+        在异步客户端中，这个方法仅返回默认值，实际验证应通过_async_validate_api_key异步进行。
+        
+        Returns:
+            str: 默认的用户邮箱地址
+        """
+        return self.DEFAULT_USER_EMAIL
 
     def _prepare_params(self, kwargs: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """准备API请求的查询参数
