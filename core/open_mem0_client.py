@@ -1,6 +1,7 @@
-import hashlib
 import logging
 import os
+import hashlib  # 添加hashlib导入
+import logging  # 添加logging导入
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -12,6 +13,7 @@ from mem0.client.utils import api_error_handler
 from mem0.memory.setup import get_user_id
 from mem0.memory.telemetry import capture_client_event
 
+# 添加logger定义
 logger = logging.getLogger(__name__)
 
 
@@ -157,7 +159,11 @@ class OpenMemoryClient(MemoryClient):
         """添加新记忆，使用OpenMemory API路径格式
         """
         kwargs = self._prepare_params(kwargs)
-        payload = self._prepare_payload(messages, kwargs)
+        # 从messages中提取文本内容
+        text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
+        payload = {"text": text}
+        if "metadata" in kwargs:
+            payload["metadata"] = kwargs["metadata"]
         response = self.client.post("/api/v1/memories/", json=payload)
         response.raise_for_status()
         if "metadata" in kwargs:
@@ -197,13 +203,20 @@ class OpenMemoryClient(MemoryClient):
 
     @api_error_handler
     def search(self, query: str, version: str = "v1", **kwargs) -> List[Dict[str, Any]]:
-        """搜索记忆，使用OpenMemory API路径格式
-        """
+        """搜索记忆，使用OpenMemory API路径格式"""
+        # 准备URL查询参数
         params = self._prepare_params(kwargs)
-        response = self.client.post("/api/v1/memories/search/", json={"query": query, **params})
+        
+        # 将query直接添加到URL查询参数中，但避免重复
+        params["query"] = query
+        
+        # 使用不带末尾斜杠的路径，并且不发送请求体（空dict）
+        response = self.client.post("/api/v1/memories/search", params=params, json={})
         response.raise_for_status()
+        
         if "metadata" in kwargs:
             del kwargs["metadata"]
+        
         capture_client_event(
             "client.search",
             self,
@@ -213,8 +226,9 @@ class OpenMemoryClient(MemoryClient):
                 "sync_type": "sync",
             },
         )
+        
         return response.json()
-
+    
     @api_error_handler
     def update(self, memory_id: str, text: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """更新记忆，使用OpenMemory API路径格式
@@ -533,3 +547,4 @@ class AsyncOpenMemoryClient(AsyncMemoryClient):
         if "metadata" in kwargs:
             payload["metadata"] = kwargs["metadata"]
         return payload
+# 删除重复的add方法定义
