@@ -31,7 +31,6 @@ from schemas.api_schemas import (
 )
 
 
-
 config = get_config()
 
 # 根据配置选择使用的聊天引擎
