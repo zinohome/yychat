@@ -19,7 +19,7 @@ class OpenMemoryClient(MemoryClient):
     """自定义的同步Mem0客户端，适配本地openmemory服务器
 
     继承自Mem0的MemoryClient，添加了默认的org_id、project_id和user_email，
-    并重写了_validate_api_key方法以适配本地服务器的认证方式。
+    并重写了API调用方法以适配本地服务器的路径格式和认证方式。
     """
     
     # 默认值常量
@@ -68,7 +68,7 @@ class OpenMemoryClient(MemoryClient):
             self.client.base_url = httpx.URL(self.host)
             self.client.headers.update(
                 {
-                    "Authorization": f"Bearer {self.api_key}",  # 将Token改为Bearer
+                    "Authorization": f"Bearer {self.api_key}",
                     "Mem0-User-ID": self.user_id,
                 }
             )
@@ -76,7 +76,7 @@ class OpenMemoryClient(MemoryClient):
             self.client = httpx.Client(
                 base_url=self.host,
                 headers={
-                    "Authorization": f"Bearer {self.api_key}",  # 将Token改为Bearer
+                    "Authorization": f"Bearer {self.api_key}",
                     "Mem0-User-ID": self.user_id,
                 },
                 timeout=300,
@@ -152,12 +152,126 @@ class OpenMemoryClient(MemoryClient):
 
         return {k: v for k, v in kwargs.items() if v is not None}
 
+    @api_error_handler
+    def add(self, messages: List[Dict[str, str]], **kwargs) -> Dict[str, Any]:
+        """添加新记忆，使用OpenMemory API路径格式
+        """
+        kwargs = self._prepare_params(kwargs)
+        payload = self._prepare_payload(messages, kwargs)
+        response = self.client.post("/api/v1/memories/", json=payload)
+        response.raise_for_status()
+        if "metadata" in kwargs:
+            del kwargs["metadata"]
+        capture_client_event("client.add", self, {"keys": list(kwargs.keys()), "sync_type": "sync"})
+        return response.json()
+
+    @api_error_handler
+    def get(self, memory_id: str) -> Dict[str, Any]:
+        """获取特定记忆，使用OpenMemory API路径格式
+        """
+        params = self._prepare_params()
+        response = self.client.get(f"/api/v1/memories/{memory_id}/", params=params)
+        response.raise_for_status()
+        capture_client_event("client.get", self, {"memory_id": memory_id, "sync_type": "sync"})
+        return response.json()
+
+    @api_error_handler
+    def get_all(self, version: str = "v1", **kwargs) -> List[Dict[str, Any]]:
+        """获取所有记忆，使用OpenMemory API路径格式
+        """
+        params = self._prepare_params(kwargs)
+        response = self.client.get("/api/v1/memories/", params=params)
+        response.raise_for_status()
+        if "metadata" in kwargs:
+            del kwargs["metadata"]
+        capture_client_event(
+            "client.get_all",
+            self,
+            {
+                "api_version": version,
+                "keys": list(kwargs.keys()),
+                "sync_type": "sync",
+            },
+        )
+        return response.json()
+
+    @api_error_handler
+    def search(self, query: str, version: str = "v1", **kwargs) -> List[Dict[str, Any]]:
+        """搜索记忆，使用OpenMemory API路径格式
+        """
+        params = self._prepare_params(kwargs)
+        response = self.client.post("/api/v1/memories/search/", json={"query": query, **params})
+        response.raise_for_status()
+        if "metadata" in kwargs:
+            del kwargs["metadata"]
+        capture_client_event(
+            "client.search",
+            self,
+            {
+                "api_version": version,
+                "keys": list(kwargs.keys()),
+                "sync_type": "sync",
+            },
+        )
+        return response.json()
+
+    @api_error_handler
+    def update(self, memory_id: str, text: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """更新记忆，使用OpenMemory API路径格式
+        """
+        if text is None and metadata is None:
+            raise ValueError("Either text or metadata must be provided for update.")
+
+        payload = {}
+        if text is not None:
+            payload["text"] = text
+        if metadata is not None:
+            payload["metadata"] = metadata
+
+        capture_client_event("client.update", self, {"memory_id": memory_id, "sync_type": "sync"})
+        params = self._prepare_params()
+        response = self.client.put(f"/api/v1/memories/{memory_id}/", json=payload, params=params)
+        response.raise_for_status()
+        return response.json()
+
+    @api_error_handler
+    def delete(self, memory_id: str) -> Dict[str, Any]:
+        """删除特定记忆，使用OpenMemory API路径格式
+        """
+        params = self._prepare_params()
+        response = self.client.delete(f"/api/v1/memories/{memory_id}/", params=params)
+        response.raise_for_status()
+        capture_client_event("client.delete", self, {"memory_id": memory_id, "sync_type": "sync"})
+        return response.json()
+
+    @api_error_handler
+    def delete_all(self, **kwargs) -> Dict[str, str]:
+        """删除所有记忆，使用OpenMemory API路径格式
+        """
+        params = self._prepare_params(kwargs)
+        response = self.client.delete("/api/v1/memories/", params=params)
+        response.raise_for_status()
+        capture_client_event(
+            "client.delete_all",
+            self,
+            {"keys": list(kwargs.keys()), "sync_type": "sync"},
+        )
+        return response.json()
+
+    def _prepare_payload(self, messages: List[Dict[str, str]], kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        """准备API请求的负载数据
+        """
+        payload = {"messages": messages}
+        if "metadata" in kwargs:
+            payload["metadata"] = kwargs["metadata"]
+        return payload
+
 
 class AsyncOpenMemoryClient(AsyncMemoryClient):
     """自定义的异步Mem0客户端，适配本地openmemory服务器
 
     继承自Mem0的AsyncMemoryClient，添加了默认的org_id、project_id和user_email，
-    并重写了_validate_api_key方法以适配本地服务器的认证方式。
+    并重写了API调用方法以适配本地服务器的路径格式和认证方式。
     """
     
     # 默认值常量
@@ -206,7 +320,7 @@ class AsyncOpenMemoryClient(AsyncMemoryClient):
             self.async_client.base_url = httpx.URL(self.host)
             self.async_client.headers.update(
                 {
-                    "Authorization": f"Bearer {self.api_key}",  # 将Token改为Bearer
+                    "Authorization": f"Bearer {self.api_key}",
                     "Mem0-User-ID": self.user_id,
                 }
             )
@@ -214,7 +328,7 @@ class AsyncOpenMemoryClient(AsyncMemoryClient):
             self.async_client = httpx.AsyncClient(
                 base_url=self.host,
                 headers={
-                    "Authorization": f"Bearer {self.api_key}",  # 将Token改为Bearer
+                    "Authorization": f"Bearer {self.api_key}",
                     "Mem0-User-ID": self.user_id,
                 },
                 timeout=300,
@@ -305,3 +419,117 @@ class AsyncOpenMemoryClient(AsyncMemoryClient):
         kwargs["project_id"] = self.project_id
 
         return {k: v for k, v in kwargs.items() if v is not None}
+
+    @api_error_handler
+    async def add(self, messages: List[Dict[str, str]], **kwargs) -> Dict[str, Any]:
+        """异步添加新记忆，使用OpenMemory API路径格式
+        """
+        kwargs = self._prepare_params(kwargs)
+        payload = self._prepare_payload(messages, kwargs)
+        response = await self.async_client.post("/api/v1/memories/", json=payload)
+        response.raise_for_status()
+        if "metadata" in kwargs:
+            del kwargs["metadata"]
+        capture_client_event("client.add", self, {"keys": list(kwargs.keys()), "sync_type": "async"})
+        return response.json()
+
+    @api_error_handler
+    async def get(self, memory_id: str) -> Dict[str, Any]:
+        """异步获取特定记忆，使用OpenMemory API路径格式
+        """
+        params = self._prepare_params()
+        response = await self.async_client.get(f"/api/v1/memories/{memory_id}/", params=params)
+        response.raise_for_status()
+        capture_client_event("client.get", self, {"memory_id": memory_id, "sync_type": "async"})
+        return response.json()
+
+    @api_error_handler
+    async def get_all(self, version: str = "v1", **kwargs) -> List[Dict[str, Any]]:
+        """异步获取所有记忆，使用OpenMemory API路径格式
+        """
+        params = self._prepare_params(kwargs)
+        response = await self.async_client.get("/api/v1/memories/", params=params)
+        response.raise_for_status()
+        if "metadata" in kwargs:
+            del kwargs["metadata"]
+        capture_client_event(
+            "client.get_all",
+            self,
+            {
+                "api_version": version,
+                "keys": list(kwargs.keys()),
+                "sync_type": "async",
+            },
+        )
+        return response.json()
+
+    @api_error_handler
+    async def search(self, query: str, version: str = "v1", **kwargs) -> List[Dict[str, Any]]:
+        """异步搜索记忆，使用OpenMemory API路径格式
+        """
+        params = self._prepare_params(kwargs)
+        response = await self.async_client.post("/api/v1/memories/search/", json={"query": query, **params})
+        response.raise_for_status()
+        if "metadata" in kwargs:
+            del kwargs["metadata"]
+        capture_client_event(
+            "client.search",
+            self,
+            {
+                "api_version": version,
+                "keys": list(kwargs.keys()),
+                "sync_type": "async",
+            },
+        )
+        return response.json()
+
+    @api_error_handler
+    async def update(self, memory_id: str, text: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """异步更新记忆，使用OpenMemory API路径格式
+        """
+        if text is None and metadata is None:
+            raise ValueError("Either text or metadata must be provided for update.")
+
+        payload = {}
+        if text is not None:
+            payload["text"] = text
+        if metadata is not None:
+            payload["metadata"] = metadata
+
+        capture_client_event("client.update", self, {"memory_id": memory_id, "sync_type": "async"})
+        params = self._prepare_params()
+        response = await self.async_client.put(f"/api/v1/memories/{memory_id}/", json=payload, params=params)
+        response.raise_for_status()
+        return response.json()
+
+    @api_error_handler
+    async def delete(self, memory_id: str) -> Dict[str, Any]:
+        """异步删除特定记忆，使用OpenMemory API路径格式
+        """
+        params = self._prepare_params()
+        response = await self.async_client.delete(f"/api/v1/memories/{memory_id}/", params=params)
+        response.raise_for_status()
+        capture_client_event("client.delete", self, {"memory_id": memory_id, "sync_type": "async"})
+        return response.json()
+
+    @api_error_handler
+    async def delete_all(self, **kwargs) -> Dict[str, str]:
+        """异步删除所有记忆，使用OpenMemory API路径格式
+        """
+        params = self._prepare_params(kwargs)
+        response = await self.async_client.delete("/api/v1/memories/", params=params)
+        response.raise_for_status()
+        capture_client_event(
+            "client.delete_all",
+            self,
+            {"keys": list(kwargs.keys()), "sync_type": "async"},
+        )
+        return response.json()
+
+    def _prepare_payload(self, messages: List[Dict[str, str]], kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        """准备API请求的负载数据
+        """
+        payload = {"messages": messages}
+        if "metadata" in kwargs:
+            payload["metadata"] = kwargs["metadata"]
+        return payload
