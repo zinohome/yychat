@@ -30,7 +30,11 @@ from schemas.api_schemas import (
     MCPServiceCallRequest
 )
 
-
+import warnings
+# 忽略Pydantic的model_fields弃用警告
+warnings.filterwarnings("ignore", category=DeprecationWarning, message=".*model_fields.*")
+# 忽略FastAPI的on_event弃用警告
+warnings.filterwarnings("ignore", category=DeprecationWarning, message=".*on_event.*")
 config = get_config()
 
 # 根据配置选择使用的聊天引擎
