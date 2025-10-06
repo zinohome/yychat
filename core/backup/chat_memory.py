@@ -7,8 +7,6 @@ from config.config import get_config
 from utils.log import log
 import asyncio
 
-
-
 class ChatMemory:
     def __init__(self, memory=None):
         # 在__init__方法内获取配置
