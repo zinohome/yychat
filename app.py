@@ -39,9 +39,9 @@ config = get_config()
 
 # 根据配置选择使用的聊天引擎
 if config.CHAT_ENGINE == "mem0_proxy":
-    from core.mem0_proxy import Mem0ProxyManager
-    # 初始化Mem0ProxyManager
-    chat_engine = Mem0ProxyManager()
+    from core.mem0_proxy import get_mem0_proxy
+    # 初始化Mem0代理引擎（单例）
+    chat_engine = get_mem0_proxy()
     log.info("Using Mem0 Proxy as chat engine")
 else:
     # 默认使用chat_engine
@@ -151,7 +151,6 @@ async def create_chat_completion(request: ChatCompletionRequest, api_key: str = 
             # 流式响应处理
             async def stream_generator():
                 try:
-                    # 确保正确调用chat_engine.generate_response并等待协程解析
                     generator = await chat_engine.generate_response(
                         request.messages,
                         conversation_id,
@@ -159,26 +158,9 @@ async def create_chat_completion(request: ChatCompletionRequest, api_key: str = 
                         request.use_tools,
                         stream=True
                     )
-                    # 异步迭代生成器
-                    async for chunk in generator:
-                        if chunk.get("stream", False):
-                            # 构建SSE格式的响应
-                            response_data = {
-                                "id": f"chatcmpl-{conversation_id}",
-                                "object": "chat.completion.chunk",
-                                "created": int(asyncio.get_event_loop().time()),
-                                "model": request.model,
-                                "choices": [{"index": 0, "delta": {"content": chunk["content"]}, "finish_reason": chunk["finish_reason"]}]
-                            }
-                            yield f"data: {json.dumps(response_data)}\n\n"
-                              
-                            # 如果是结束标志，退出循环
-                            if chunk["finish_reason"] is not None:
-                                break
-                except Exception as e:
-                    log.error(f"Error in stream generator: {e}")
-                    # 发送错误消息
-                    error_message = f"发生错误: {str(e)}"
+                except Exception as gen_err:
+                    log.error(f"Error creating stream generator: {gen_err}")
+                    error_message = f"发生错误: {str(gen_err)}"
                     error_data = {
                         "id": f"chatcmpl-{conversation_id}",
                         "object": "chat.completion.chunk",
@@ -187,7 +169,33 @@ async def create_chat_completion(request: ChatCompletionRequest, api_key: str = 
                         "choices": [{"index": 0, "delta": {"content": error_message}, "finish_reason": "error"}]
                     }
                     yield f"data: {json.dumps(error_data)}\n\n"
-                    # 确保发送DONE标记
+                    yield 'data: [DONE]\n\n'
+                    return
+                
+                try:
+                    async for chunk in generator:
+                        if chunk.get("stream", False):
+                            response_data = {
+                                "id": f"chatcmpl-{conversation_id}",
+                                "object": "chat.completion.chunk",
+                                "created": int(asyncio.get_event_loop().time()),
+                                "model": request.model,
+                                "choices": [{"index": 0, "delta": {"content": chunk["content"]}, "finish_reason": chunk["finish_reason"]}]
+                            }
+                            yield f"data: {json.dumps(response_data)}\n\n"
+                            if chunk["finish_reason"] is not None:
+                                break
+                except Exception as iter_err:
+                    log.error(f"Error in stream iteration: {iter_err}")
+                    error_message = f"发生错误: {str(iter_err)}"
+                    error_data = {
+                        "id": f"chatcmpl-{conversation_id}",
+                        "object": "chat.completion.chunk",
+                        "created": int(asyncio.get_event_loop().time()),
+                        "model": request.model,
+                        "choices": [{"index": 0, "delta": {"content": error_message}, "finish_reason": "error"}]
+                    }
+                    yield f"data: {json.dumps(error_data)}\n\n"
                     yield 'data: [DONE]\n\n'
             
             return StreamingResponse(stream_generator(), media_type="text/event-stream")
@@ -317,7 +325,7 @@ async def call_mcp_service(request: MCPServiceCallRequest, api_key: str = Depend
                 raise HTTPException(status_code=400, detail={"error": {"message": "Missing tool_name or both service_name and method_name", "type": "validation_error"}})
         
         # 调用MCP服务，传递所有必要参数
-        result = await chat_engine.call_mcp_service(
+        result = chat_engine.call_mcp_service(
             tool_name=tool_name,
             params=params,
             service_name=request.service_name,
