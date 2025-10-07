@@ -118,17 +118,20 @@ class ChatEngine:
             personality_system = ""
             
             # 从记忆中检索相关内容
-            if conversation_id != "default" and messages_copy:
+            if config.ENABLE_MEMORY_RETRIEVAL and conversation_id != "default" and messages_copy:
                 relevant_memories = await self.async_chat_memory.get_relevant_memory(conversation_id, messages_copy[-1]["content"])
                 if relevant_memories:
                     memory_text = "\n".join(relevant_memories)
                     memory_section = f"参考记忆：\n{memory_text}"
+                    log.debug(f"检索到相关记忆 {len(relevant_memories)} 条")
                     
                     # 使用新的token预算模块检查是否应该包含记忆
                     max_tokens = getattr(config, 'OPENAI_MAX_TOKENS', 8192)
                     if not should_include_memory(messages_copy, memory_section, max_tokens):
                         log.warning("避免超出模型token限制，不添加记忆到系统提示")
                         memory_section = ""
+            elif not config.ENABLE_MEMORY_RETRIEVAL:
+                log.debug("Memory检索已禁用")
             # 获取人格信息
             allowed_tool_names = None
             if personality_id:
