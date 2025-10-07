@@ -1,10 +1,8 @@
 import asyncio
 import time
-import json  # 添加 json 模块导入
+import json
 from typing import List, Dict, Any, Optional, AsyncGenerator
-import openai
 from openai import OpenAI
-# 修改导入路径
 from config.config import get_config
 from utils.log import log
 from core.chat_memory import ChatMemory, get_async_chat_memory
@@ -13,11 +11,13 @@ from services.tools.manager import ToolManager
 import httpx
 from services.tools.registry import tool_registry
 from services.mcp.manager import mcp_manager
-from services.mcp.exceptions import MCPServiceError
-from openai.types.chat.chat_completion_message_tool_call import ChatCompletionMessageToolCall
-from openai.types.chat.chat_completion_message_function_tool_call import Function
-from openai.types.chat.chat_completion_message_function_tool_call import ChatCompletionMessageFunctionToolCall
 from services.mcp.exceptions import MCPServiceError, MCPServerNotFoundError, MCPToolNotFoundError
+# 新增模块导入
+from core.openai_client import AsyncOpenAIWrapper
+from core.request_builder import build_request_params
+from core.tools_adapter import normalize_tool_calls, build_tool_response_messages
+from core.token_budget import should_include_memory
+from core.prompt_builder import compose_system_prompt
 
 
 
@@ -25,32 +25,31 @@ config = get_config()
 
 class ChatEngine:
     def __init__(self):
-        # 修改OpenAI客户端初始化配置
-        self.client = OpenAI(
+        # 初始化同步客户端
+        self.sync_client = OpenAI(
             api_key=config.OPENAI_API_KEY,
             base_url=config.OPENAI_BASE_URL,
-            # 从配置文件读取超时设置
             timeout=config.OPENAI_API_TIMEOUT,
-            # 配置HTTP客户端以提高性能
             http_client=httpx.Client(
                 follow_redirects=True,
-                verify=config.VERIFY_SSL,  # 从配置读取SSL验证设置
-                http2=True,  # 启用HTTP/2以提高并发性能
+                verify=config.VERIFY_SSL,
+                http2=True,
                 timeout=httpx.Timeout(
-                    connect=config.OPENAI_CONNECT_TIMEOUT,  # 连接超时
-                    read=config.OPENAI_READ_TIMEOUT,        # 读取超时
-                    write=config.OPENAI_WRITE_TIMEOUT,      # 写入超时
-                    pool=config.OPENAI_POOL_TIMEOUT         # 池超时
+                    connect=config.OPENAI_CONNECT_TIMEOUT,
+                    read=config.OPENAI_READ_TIMEOUT,
+                    write=config.OPENAI_WRITE_TIMEOUT,
+                    pool=config.OPENAI_POOL_TIMEOUT
                 ),
                 limits=httpx.Limits(
-                    max_connections=config.MAX_CONNECTIONS,  # 最大连接数
-                    max_keepalive_connections=config.MAX_KEEPALIVE_CONNECTIONS,  # 最大保持连接数
-                    keepalive_expiry=config.KEEPALIVE_EXPIRY  # 保持连接过期时间
+                    max_connections=config.MAX_CONNECTIONS,
+                    max_keepalive_connections=config.MAX_KEEPALIVE_CONNECTIONS,
+                    keepalive_expiry=config.KEEPALIVE_EXPIRY
                 )
             )
         )
+        # 包装为异步客户端
+        self.client = AsyncOpenAIWrapper(self.sync_client)
         self.chat_memory = ChatMemory()
-        # 初始化异步内存实例，用于异步操作
         self.async_chat_memory = get_async_chat_memory()
         self.personality_manager = PersonalityManager()
         self.tool_manager = ToolManager()
@@ -85,93 +84,48 @@ class ChatEngine:
                 stream = config.STREAM_DEFAULT
                 log.info(f"未指定stream，使用默认值: {stream}")
             
-            # 首先从记忆中检索相关内容 - 修改为使用异步版本
+            # 获取记忆和人格信息
+            memory_section = ""
+            personality_system = ""
+            
+            # 从记忆中检索相关内容
             if conversation_id != "default" and messages_copy:
-                # 使用messages_copy的最后一条消息作为查询
                 relevant_memories = await self.async_chat_memory.get_relevant_memory(conversation_id, messages_copy[-1]["content"])
                 if relevant_memories:
-                    # 估算token数量并控制在模型限制内
                     memory_text = "\n".join(relevant_memories)
                     memory_section = f"参考记忆：\n{memory_text}"
                     
-                    # 估算token数 - 使用简单的估算方法
-                    # 假设每个token大约是4个字符
-                    estimated_memory_tokens = len(memory_section) // 4
-                    estimated_user_tokens = sum(len(msg.get('content', '')) for msg in messages_copy) // 4
-                    
-                    # 模型最大token限制 - 从配置中获取或使用默认值
+                    # 使用新的token预算模块检查是否应该包含记忆
                     max_tokens = getattr(config, 'OPENAI_MAX_TOKENS', 8192)
-                    
-                    # 预留部分空间给系统提示和模型输出
-                    safety_margin = 0.8  # 使用80%的空间
-                    
-                    # 如果添加记忆不会导致超出限制，则添加记忆
-                    if estimated_memory_tokens + estimated_user_tokens < max_tokens * safety_margin:
-                        # 将记忆添加到消息列表开头
-                        messages_copy = [{"role": "system", "content": memory_section}] + messages_copy
-                        log.debug(f"添加了记忆到系统提示，估算token数: {estimated_memory_tokens}")
-                    else:
-                        # 如果记忆太多，选择不添加
-                        log.warning(f"避免超出模型token限制，不添加记忆到系统提示。\n估算记忆token: {estimated_memory_tokens}, 用户消息token: {estimated_user_tokens}, 限制: {max_tokens * safety_margin}")
-            # 初始化allowed_tool_names为None
+                    if not should_include_memory(messages_copy, memory_section, max_tokens):
+                        log.warning("避免超出模型token限制，不添加记忆到系统提示")
+                        memory_section = ""
+            # 获取人格信息
             allowed_tool_names = None
-            
-            # 应用人格 - 修复参数顺序
             if personality_id:
                 try:
-                    messages_copy = self.personality_manager.apply_personality(messages_copy, personality_id)
-                    log.debug(f"应用人格后消息: {messages_copy}")
-                    
-                    # 获取人格的allowed_tools信息，用于工具过滤
                     personality = self.personality_manager.get_personality(personality_id)
-                    if personality and personality.allowed_tools:
-                        allowed_tool_names = [tool["tool_name"] for tool in personality.allowed_tools]
+                    if personality:
+                        personality_system = personality.system_prompt or ""
+                        if personality.allowed_tools:
+                            allowed_tool_names = [tool["tool_name"] for tool in personality.allowed_tools]
                 except Exception as e:
-                    log.warning(f"应用人格时出错，忽略人格设置: {e}")
+                    log.warning(f"获取人格时出错，忽略人格设置: {e}")
             
-            # 构建请求参数
-            request_params = {
-                "model": config.OPENAI_MODEL,
-                "messages": messages_copy,
-                "temperature": float(config.OPENAI_TEMPERATURE)  # 转换为浮点数
-            }
+            # 使用新的提示构建器合成系统提示
+            messages_copy = compose_system_prompt(messages_copy, personality_system, memory_section)
+            log.debug(f"合成系统提示后消息: {messages_copy}")
             
-            # 如果启用了工具，添加工具schema到请求参数
-            if use_tools:
-                # 获取所有注册的工具schema
-                all_tools_schema = tool_registry.get_functions_schema()
-                log.debug(f"原始工具数量: {len(all_tools_schema)}")
-                log.debug(f"允许的工具名称: {allowed_tool_names}")
-                
-                # 如果有allowed_tools配置，则进行过滤
-                if allowed_tool_names:
-                    # 只保留allowed_tools中列出的工具
-                    tools_schema = []
-                    for tool in all_tools_schema:
-                        tool_name = tool.get("function", {}).get("name")
-                        if tool_name in allowed_tool_names:
-                            tools_schema.append(tool)
-                    log.info(f"已根据人格配置过滤工具，剩余工具数量: {len(tools_schema)}")
-                else:
-                    # 如果没有allowed_tools配置，则使用所有工具
-                    tools_schema = all_tools_schema
-                    log.info(f"未设置人格工具过滤，使用所有工具，工具数量: {len(tools_schema)}")
-                if tools_schema:
-                    request_params["tools"] = tools_schema
-                    
-                    # 对于时间相关问题，强制使用工具
-                    last_message = messages_copy[-1]["content"].lower() if messages_copy else ""
-                    if any(keyword in last_message for keyword in ["几点", "时间", "现在", "几点钟", "时刻"]):
-                        # 只有当gettime工具在allowed_tools中时才强制使用
-                        if not allowed_tool_names or "gettime" in allowed_tool_names:
-                            request_params["tool_choice"] = {"type": "function", "function": {"name": "gettime"}}
-                            log.info("检测到时间相关问题，强制使用gettime工具")
-                        else:
-                            log.info("检测到时间相关问题，但gettime工具不在允许使用的工具列表中")
-                else:
-                    log.warning("未找到允许使用的工具，无法添加工具schema到请求参数")
-            else:
-                log.debug("工具调用已禁用")
+            # 使用新的请求构建器构建请求参数
+            all_tools_schema = tool_registry.get_functions_schema() if use_tools else None
+            request_params = build_request_params(
+                model=config.OPENAI_MODEL,
+                temperature=float(config.OPENAI_TEMPERATURE),
+                messages=messages_copy,
+                use_tools=use_tools,
+                all_tools_schema=all_tools_schema,
+                allowed_tool_names=allowed_tool_names
+            )
             
             log.debug(f"最终请求参数: {request_params}")
             # 记录总请求处理时间
@@ -205,8 +159,8 @@ class ChatEngine:
         original_messages: List[Dict[str, str]]
     ) -> Dict[str, Any]:
         try:
-            # 调用OpenAI API
-            response = self.client.chat.completions.create(**request_params)
+            # 调用异步OpenAI API
+            response = await self.client.create_chat(request_params)
             log.debug(f"OpenAI API响应: {response}")
             
             # 增加响应格式验证
@@ -270,11 +224,6 @@ class ChatEngine:
         try:
             # 记录API调用开始时间
             api_start_time = time.time()
-            request_params["stream"] = True
-            
-            # 使用异步方式调用API（如果OpenAI客户端支持）
-            response = self.client.chat.completions.create(**request_params)
-            log.debug(f"OpenAI API调用耗时: {time.time() - api_start_time:.2f}秒")
             
             # 初始化变量
             tool_calls = None
@@ -282,8 +231,8 @@ class ChatEngine:
             chunk_count = 0
             first_chunk_time = None
             
-            # 流式处理响应
-            for chunk in response:
+            # 使用异步流式API
+            async for chunk in self.client.create_chat_stream(request_params):
                 chunk_count += 1
                 if chunk_count == 1:
                     first_chunk_time = time.time()
@@ -358,42 +307,57 @@ class ChatEngine:
             
             # 检查是否有工具调用需要处理
             if tool_calls:
-                # 转换工具调用格式为OpenAI标准格式
-                  
-                formatted_tool_calls = []
-                for tool_call in tool_calls:
-                    # 使用正确的Function类
-                    function = Function(
-                        name=tool_call["function"]["name"],
-                        arguments=tool_call["function"]["arguments"]
-                    )
-                    
-                    # 由于ChatCompletionMessageToolCall是一个类型别名，我们需要直接创建正确的对象
-                    # 这里我们创建ChatCompletionMessageFunctionToolCall类型的对象   
-                                       
-                    formatted_tool_call = ChatCompletionMessageFunctionToolCall(
-                        id=tool_call["id"],
-                        type="function",
-                        function=function
-                    )
-                    formatted_tool_calls.append(formatted_tool_call)
+                # 使用新的工具适配器规范化工具调用
+                normalized_calls = normalize_tool_calls(tool_calls)
                 
-                # 处理工具调用并获取结果
-                tool_response = await self._handle_tool_calls(
-                    formatted_tool_calls,
-                    conversation_id,
-                    original_messages
+                # 准备工具调用列表
+                calls_to_execute = []
+                for call in normalized_calls:
+                    calls_to_execute.append({
+                        "name": call["function"]["name"],
+                        "parameters": json.loads(call["function"]["arguments"])
+                    })
+                
+                # 并行执行所有工具调用
+                tool_results = await self.tool_manager.execute_tools_concurrently(calls_to_execute)
+                
+                # 使用新的工具适配器构建工具响应消息
+                tool_response_messages = build_tool_response_messages(normalized_calls, tool_results)
+                
+                # 构建新的消息历史
+                new_messages = original_messages.copy()
+                new_messages.append({"role": "assistant", "tool_calls": normalized_calls})
+                new_messages.extend(tool_response_messages)
+                
+                # 重新构建请求参数，继续流式生成
+                follow_up_params = build_request_params(
+                    model=config.OPENAI_MODEL,
+                    temperature=float(config.OPENAI_TEMPERATURE),
+                    messages=new_messages,
+                    use_tools=False,  # 工具调用后不再使用工具
+                    all_tools_schema=None,
+                    allowed_tool_names=None
                 )
                 
-                # 由于_tool_calls返回的是非流式响应，我们需要模拟流式输出
-                if tool_response and "content" in tool_response:
-                    # 这里可以根据需要将内容分块输出
-                    yield {
-                        "role": "assistant",
-                        "content": tool_response["content"],
-                        "finish_reason": "stop",
-                        "stream": True
-                    }
+                # 继续流式输出工具调用后的回答
+                async for follow_up_chunk in self.client.create_chat_stream(follow_up_params):
+                    if follow_up_chunk.choices and len(follow_up_chunk.choices) > 0:
+                        choice = follow_up_chunk.choices[0]
+                        if choice.delta.content is not None:
+                            yield {
+                                "role": "assistant",
+                                "content": choice.delta.content,
+                                "finish_reason": None,
+                                "stream": True
+                            }
+                
+                # 发送结束标志
+                yield {
+                    "role": "assistant",
+                    "content": "",
+                    "finish_reason": "stop",
+                    "stream": True
+                }
             else:
                 # 保存到记忆 - 使用原生异步API
                 if conversation_id and full_content:
@@ -426,40 +390,29 @@ class ChatEngine:
         conversation_id: str,
         original_messages: List[Dict[str, str]]
     ) -> Dict[str, Any]:
+        # 使用新的工具适配器规范化工具调用
+        normalized_calls = normalize_tool_calls(tool_calls)
+        
         # 准备工具调用列表
         calls_to_execute = []
-        for tool_call in tool_calls:
+        for call in normalized_calls:
             calls_to_execute.append({
-                "name": tool_call.function.name,
-                "parameters": json.loads(tool_call.function.arguments)
+                "name": call["function"]["name"],
+                "parameters": json.loads(call["function"]["arguments"])
             })
         
         # 并行执行所有工具调用
         tool_results = await self.tool_manager.execute_tools_concurrently(calls_to_execute)
         
-        # 构建工具调用响应消息
-        tool_response_messages = []
-        for i, result in enumerate(tool_results):
-            tool_call = tool_calls[i]
-            if result["success"]:
-                content = f"工具 '{result['tool_name']}' 调用结果: {json.dumps(result['result'])}"
-            else:
-                content = f"工具 '{result['tool_name']}' 调用失败: {result.get('error', '未知错误')}"
-            
-            tool_response_messages.append({
-                "tool_call_id": tool_call.id,
-                "role": "tool",
-                "name": tool_call.function.name,
-                "content": content
-            })
+        # 使用新的工具适配器构建工具响应消息
+        tool_response_messages = build_tool_response_messages(normalized_calls, tool_results)
         
         # 将工具调用结果添加到消息历史中，再次调用模型
         new_messages = original_messages.copy()
-        new_messages.append({"role": "assistant", "tool_calls": tool_calls})
+        new_messages.append({"role": "assistant", "tool_calls": normalized_calls})
         new_messages.extend(tool_response_messages)
         
         # 重新生成响应 - 明确设置stream=False
-        # 确保generate_response返回字典而不是异步生成器
         return await self.generate_response(new_messages, conversation_id, use_tools=False, stream=False)
     
     async def call_mcp_service(self, tool_name: str = None, params: dict = None, 
