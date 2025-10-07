@@ -6,21 +6,25 @@ from utils.log import log
 
 
 class ToolManager:
-    async def execute_tool(self, tool_name: str, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    async def execute_tool(self, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
         tool = tool_registry.get_tool(tool_name)
         if not tool:
             log.warning(f"Tool {tool_name} not found")
-            return None
+            return {
+                "success": False, 
+                "error": f"工具 '{tool_name}' 未找到",
+                "tool_name": tool_name
+            }
         
         try:
             # 异步执行工具
             log.debug(f"Executing tool: {tool_name} with params: {params}")
             result = await tool.execute(params)
             log.debug(f"Tool {tool_name} execution finished. Success: True")
-            return {"success": True, "result": result}
+            return {"success": True, "result": result, "tool_name": tool_name}
         except Exception as e:
             log.error(f"Error executing tool {tool_name}: {e}")
-            return {"success": False, "error": str(e)}
+            return {"success": False, "error": str(e), "tool_name": tool_name}
     
     async def execute_tools_concurrently(self, tool_calls: list) -> list:
         # 并行执行多个工具
@@ -36,15 +40,14 @@ class ToolManager:
         processed_results = []
         for i, result in enumerate(results):
             if isinstance(result, Exception):
+                # 异常情况：返回错误信息
                 processed_results.append({
                     "success": False,
                     "error": str(result),
                     "tool_name": tool_calls[i]["name"]
                 })
             else:
+                # 正常情况：execute_tool 已经返回完整的字典
                 processed_results.append(result)
-                # 只有当result不是None时才添加tool_name
-                if result is not None:
-                    processed_results[-1]["tool_name"] = tool_calls[i]["name"]
         
         return processed_results

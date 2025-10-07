@@ -26,12 +26,26 @@ def filter_tools_schema(all_tools_schema: List[Dict[str, Any]],
 
 def select_tool_choice(last_message: str,
                        allowed_tool_names: Optional[List[str]]) -> Optional[Dict[str, Any]]:
+    """
+    根据用户消息选择要强制使用的工具
+    
+    注意：只有当工具在 allowed_tool_names 中时才会返回 tool_choice
+    这样可以避免 OpenAI API 报错：tool_choice 指定的工具不在 tools 列表中
+    """
     if not last_message:
         return None
     msg = last_message.lower()
     if any(k in msg for k in TIME_KEYWORDS):
-        if (not allowed_tool_names) or (TIME_TOOL_NAME in allowed_tool_names):
+        # 只有当没有限制或者 gettime 在允许列表中时才强制使用
+        if not allowed_tool_names:
+            # 没有限制，可以使用
             return {"type": "function", "function": {"name": TIME_TOOL_NAME}}
+        elif TIME_TOOL_NAME in allowed_tool_names:
+            # gettime 在允许列表中，可以使用
+            return {"type": "function", "function": {"name": TIME_TOOL_NAME}}
+        else:
+            # gettime 不在允许列表中，不强制使用（让模型自由选择或不用工具）
+            return None
     return None
 
 
@@ -39,16 +53,29 @@ def normalize_tool_calls(sdk_tool_calls: List[Any]) -> List[Dict[str, Any]]:
     """
     将 SDK 的工具调用对象转换为 OpenAI 消息协议期望的可序列化 dict：
     [{"id": "...","type": "function","function": {"name": "...","arguments": "..."}}]
+    
+    兼容：
+    1. SDK 对象（有属性）
+    2. 字典（已经是我们自己收集的格式）
     """
     if not sdk_tool_calls:
         return []
     normalized: List[Dict[str, Any]] = []
     for call in sdk_tool_calls:
-        # 兼容 Streaming/Non-streaming 不同字段
-        call_id = getattr(call, "id", None) or getattr(call, "tool_call_id", None)
-        fn = getattr(call, "function", None) or {}
-        name = getattr(fn, "name", None) or (fn.get("name") if isinstance(fn, dict) else None)
-        args = getattr(fn, "arguments", None) or (fn.get("arguments") if isinstance(fn, dict) else None)
+        # 判断是字典还是对象
+        if isinstance(call, dict):
+            # 已经是字典格式，直接使用
+            call_id = call.get("id")
+            fn = call.get("function", {})
+            name = fn.get("name") if isinstance(fn, dict) else None
+            args = fn.get("arguments") if isinstance(fn, dict) else None
+        else:
+            # SDK 对象，使用 getattr
+            call_id = getattr(call, "id", None) or getattr(call, "tool_call_id", None)
+            fn = getattr(call, "function", None) or {}
+            name = getattr(fn, "name", None) or (fn.get("name") if isinstance(fn, dict) else None)
+            args = getattr(fn, "arguments", None) or (fn.get("arguments") if isinstance(fn, dict) else None)
+        
         normalized.append({
             "id": call_id,
             "type": "function",

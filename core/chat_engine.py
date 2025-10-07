@@ -61,6 +61,35 @@ class ChatEngine:
         # 记录总请求处理开始时间
         total_start_time = time.time()
         try:
+            # 验证输入参数
+            if not messages or not isinstance(messages, list):
+                error_msg = "消息列表不能为空且必须是列表类型"
+                log.error(error_msg)
+                if stream:
+                    async def error_gen():
+                        yield {"role": "assistant", "content": error_msg, "finish_reason": "error", "stream": True}
+                    return error_gen()
+                return {"role": "assistant", "content": error_msg}
+            
+            # 验证每条消息格式
+            for idx, msg in enumerate(messages):
+                if not isinstance(msg, dict):
+                    error_msg = f"消息 #{idx} 格式错误：必须是字典类型"
+                    log.error(error_msg)
+                    if stream:
+                        async def error_gen():
+                            yield {"role": "assistant", "content": error_msg, "finish_reason": "error", "stream": True}
+                        return error_gen()
+                    return {"role": "assistant", "content": error_msg}
+                if "role" not in msg or "content" not in msg:
+                    error_msg = f"消息 #{idx} 格式错误：缺少必需的 'role' 或 'content' 字段"
+                    log.error(error_msg)
+                    if stream:
+                        async def error_gen():
+                            yield {"role": "assistant", "content": error_msg, "finish_reason": "error", "stream": True}
+                        return error_gen()
+                    return {"role": "assistant", "content": error_msg}
+            
             # 打印传入的参数值，用于调试
             log.debug(f"传入参数 - personality_id: {personality_id}, use_tools: {use_tools}, stream: {stream}, type(personality_id): {type(personality_id)}, type(use_tools): {type(use_tools)}, type(stream): {type(stream)}")
             
@@ -132,9 +161,9 @@ class ChatEngine:
             log.debug(f"总请求处理时间一: {time.time() - total_start_time:.2f}秒")
             if stream:
                 # 直接返回异步生成器方法调用
-                return self._generate_streaming_response(request_params, conversation_id, messages)
+                return self._generate_streaming_response(request_params, conversation_id, messages, personality_id)
             else:
-                return await self._generate_non_streaming_response(request_params, conversation_id, messages)
+                return await self._generate_non_streaming_response(request_params, conversation_id, messages, personality_id)
         except Exception as e:
             log.error(f"Error in generate_response: {e}")
             # 返回适当的错误响应对象，而不是简单的错误字典
@@ -156,7 +185,8 @@ class ChatEngine:
         self,
         request_params: Dict[str, Any],
         conversation_id: str,
-        original_messages: List[Dict[str, str]]
+        original_messages: List[Dict[str, str]],
+        personality_id: Optional[str] = None
     ) -> Dict[str, Any]:
         try:
             # 调用异步OpenAI API
@@ -174,7 +204,8 @@ class ChatEngine:
                 return await self._handle_tool_calls(
                     response.choices[0].message.tool_calls,
                     conversation_id,
-                    original_messages
+                    original_messages,
+                    personality_id
                 )
             else:
                 # 确保content存在
@@ -219,7 +250,8 @@ class ChatEngine:
         self, 
         request_params: Dict[str, Any],
         conversation_id: str,
-        original_messages: List[Dict[str, str]]
+        original_messages: List[Dict[str, str]],
+        personality_id: Optional[str] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
         try:
             # 记录API调用开始时间
@@ -247,17 +279,29 @@ class ChatEngine:
                             tool_calls = []
                         # 收集工具调用信息
                         for tool_call in choice.delta.tool_calls:
+                            log.debug(f"收到工具调用 chunk: index={tool_call.index}, id={getattr(tool_call, 'id', None)}, "
+                                     f"has_function={hasattr(tool_call, 'function')}, "
+                                     f"function={getattr(tool_call, 'function', None)}")
+                            
                             # 初始化或更新工具调用信息
                             if tool_call.index >= len(tool_calls):
-                                tool_calls.append({"id": tool_call.id, "type": "function", "function": {}})
+                                tool_calls.append({"id": None, "type": "function", "function": {}})
+                            
+                            # 更新 ID（可能在后续 chunk 中才提供）
+                            if hasattr(tool_call, 'id') and tool_call.id:
+                                tool_calls[tool_call.index]["id"] = tool_call.id
+                                log.debug(f"更新工具调用 ID: index={tool_call.index}, id={tool_call.id}")
                             
                             # 更新函数名称和参数
-                            if hasattr(tool_call.function, 'name') and tool_call.function.name:
-                                tool_calls[tool_call.index]["function"]["name"] = tool_call.function.name
-                            if hasattr(tool_call.function, 'arguments') and tool_call.function.arguments:
-                                if "arguments" not in tool_calls[tool_call.index]["function"]:
-                                    tool_calls[tool_call.index]["function"]["arguments"] = ""
-                                tool_calls[tool_call.index]["function"]["arguments"] += tool_call.function.arguments
+                            if hasattr(tool_call, 'function') and tool_call.function:
+                                if hasattr(tool_call.function, 'name') and tool_call.function.name:
+                                    tool_calls[tool_call.index]["function"]["name"] = tool_call.function.name
+                                    log.debug(f"更新工具名称: index={tool_call.index}, name={tool_call.function.name}")
+                                if hasattr(tool_call.function, 'arguments') and tool_call.function.arguments:
+                                    if "arguments" not in tool_calls[tool_call.index]["function"]:
+                                        tool_calls[tool_call.index]["function"]["arguments"] = ""
+                                    tool_calls[tool_call.index]["function"]["arguments"] += tool_call.function.arguments
+                                    log.debug(f"累加工具参数: index={tool_call.index}, 当前长度={len(tool_calls[tool_call.index]['function']['arguments'])}")
                     
                     # 处理普通内容，优化分块输出
                     elif choice.delta.content is not None:
@@ -307,15 +351,35 @@ class ChatEngine:
             
             # 检查是否有工具调用需要处理
             if tool_calls:
+                log.debug(f"收集到的工具调用原始数据: {tool_calls}")
+                
+                # 验证所有工具调用都有有效的 ID
+                for idx, call in enumerate(tool_calls):
+                    if not call.get("id"):
+                        # 生成一个临时 ID
+                        call["id"] = f"call_{idx}_{int(time.time() * 1000)}"
+                        log.warning(f"工具调用 #{idx} 缺少 ID，已生成临时 ID: {call['id']}")
+                
+                log.debug(f"验证后的工具调用数据: {tool_calls}")
+                
                 # 使用新的工具适配器规范化工具调用
                 normalized_calls = normalize_tool_calls(tool_calls)
+                log.debug(f"规范化后的工具调用: {normalized_calls}")
                 
                 # 准备工具调用列表
                 calls_to_execute = []
                 for call in normalized_calls:
+                    # 安全地解析 JSON 参数
+                    args_str = call["function"]["arguments"]
+                    try:
+                        parameters = json.loads(args_str) if args_str else {}
+                    except json.JSONDecodeError as e:
+                        log.error(f"工具参数 JSON 解析失败: {args_str}, 错误: {e}")
+                        parameters = {}
+                    
                     calls_to_execute.append({
                         "name": call["function"]["name"],
-                        "parameters": json.loads(call["function"]["arguments"])
+                        "parameters": parameters
                     })
                 
                 # 并行执行所有工具调用
@@ -324,32 +388,59 @@ class ChatEngine:
                 # 使用新的工具适配器构建工具响应消息
                 tool_response_messages = build_tool_response_messages(normalized_calls, tool_results)
                 
-                # 构建新的消息历史
+                # 构建新的消息历史（包含工具调用和结果）
                 new_messages = original_messages.copy()
-                new_messages.append({"role": "assistant", "tool_calls": normalized_calls})
+                assistant_message_with_tools = {"role": "assistant", "tool_calls": normalized_calls}
+                log.debug(f"准备发送的 assistant 消息: {assistant_message_with_tools}")
+                new_messages.append(assistant_message_with_tools)
                 new_messages.extend(tool_response_messages)
+                log.debug(f"完整的新消息历史（共{len(new_messages)}条）: {json.dumps(new_messages, ensure_ascii=False, indent=2)}")
+                
+                # 获取 personality 系统提示并添加到消息中
+                personality_system_prompt = ""
+                if personality_id:
+                    try:
+                        personality = self.personality_manager.get_personality(personality_id)
+                        if personality:
+                            personality_system_prompt = personality.system_prompt or ""
+                    except Exception as e:
+                        log.warning(f"获取人格时出错: {e}")
+                
+                # 使用 compose_system_prompt 添加系统提示
+                new_messages_with_system = compose_system_prompt(new_messages, personality_system_prompt, "")
+                log.debug(f"添加系统提示后的消息（共{len(new_messages_with_system)}条）")
                 
                 # 重新构建请求参数，继续流式生成
                 follow_up_params = build_request_params(
                     model=config.OPENAI_MODEL,
                     temperature=float(config.OPENAI_TEMPERATURE),
-                    messages=new_messages,
+                    messages=new_messages_with_system,  # 使用包含系统提示的消息
                     use_tools=False,  # 工具调用后不再使用工具
                     all_tools_schema=None,
-                    allowed_tool_names=None
+                    allowed_tool_names=None,
+                    force_tool_from_message=False  # 不强制选择工具
                 )
                 
                 # 继续流式输出工具调用后的回答
+                follow_up_content = ""
                 async for follow_up_chunk in self.client.create_chat_stream(follow_up_params):
                     if follow_up_chunk.choices and len(follow_up_chunk.choices) > 0:
                         choice = follow_up_chunk.choices[0]
                         if choice.delta.content is not None:
+                            follow_up_content += choice.delta.content
                             yield {
                                 "role": "assistant",
                                 "content": choice.delta.content,
                                 "finish_reason": None,
                                 "stream": True
                             }
+                
+                # 保存工具调用后的响应到记忆
+                if conversation_id and follow_up_content:
+                    asyncio.create_task(self._async_save_message_to_memory(
+                        conversation_id, 
+                        [{"role": "assistant", "content": follow_up_content}, original_messages[-1]]
+                    ))
                 
                 # 发送结束标志
                 yield {
@@ -388,7 +479,8 @@ class ChatEngine:
         self,
         tool_calls: list,
         conversation_id: str,
-        original_messages: List[Dict[str, str]]
+        original_messages: List[Dict[str, str]],
+        personality_id: Optional[str] = None
     ) -> Dict[str, Any]:
         # 使用新的工具适配器规范化工具调用
         normalized_calls = normalize_tool_calls(tool_calls)
@@ -396,9 +488,17 @@ class ChatEngine:
         # 准备工具调用列表
         calls_to_execute = []
         for call in normalized_calls:
+            # 安全地解析 JSON 参数
+            args_str = call["function"]["arguments"]
+            try:
+                parameters = json.loads(args_str) if args_str else {}
+            except json.JSONDecodeError as e:
+                log.error(f"工具参数 JSON 解析失败: {args_str}, 错误: {e}")
+                parameters = {}
+            
             calls_to_execute.append({
                 "name": call["function"]["name"],
-                "parameters": json.loads(call["function"]["arguments"])
+                "parameters": parameters
             })
         
         # 并行执行所有工具调用
@@ -412,8 +512,8 @@ class ChatEngine:
         new_messages.append({"role": "assistant", "tool_calls": normalized_calls})
         new_messages.extend(tool_response_messages)
         
-        # 重新生成响应 - 明确设置stream=False
-        return await self.generate_response(new_messages, conversation_id, use_tools=False, stream=False)
+        # 重新生成响应 - 明确设置stream=False，传递personality_id避免重复应用
+        return await self.generate_response(new_messages, conversation_id, personality_id=personality_id, use_tools=False, stream=False)
     
     async def call_mcp_service(self, tool_name: str = None, params: dict = None, 
                          service_name: str = None, method_name: str = None, 

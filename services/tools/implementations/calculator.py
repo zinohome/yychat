@@ -60,5 +60,5 @@ class CalculatorTool(Tool):
             "input": params
         }
 
-# 注册工具
-#tool_registry.register(CalculatorTool)
+# 注册工具（传入类，不是实例）
+tool_registry.register(CalculatorTool)

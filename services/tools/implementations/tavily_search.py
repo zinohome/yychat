@@ -85,5 +85,5 @@ class TavilySearchTool(Tool):
         except Exception as e:
             raise Exception(f"Tavily搜索执行失败: {str(e)}")
 
-# 注册工具
-# tool_registry.register(TavilySearchTool)
+# 注册工具（传入类，不是实例）
+tool_registry.register(TavilySearchTool)

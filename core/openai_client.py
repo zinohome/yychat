@@ -17,9 +17,23 @@ class AsyncOpenAIWrapper:
 
     async def create_chat_stream(self, request_params: Dict[str, Any]) -> AsyncIterator[Any]:
         params = {**request_params, "stream": True}
-        # 在后台线程中创建同步可迭代对象，然后在主事件循环中迭代包装
-        sync_iter = await asyncio.to_thread(self._client.chat.completions.create, **params)
-
-        # 将同步迭代器包装为异步迭代器
-        for chunk in sync_iter:
+        
+        # 在后台线程中创建同步流
+        def _create_stream():
+            return self._client.chat.completions.create(**params)
+        
+        sync_stream = await asyncio.to_thread(_create_stream)
+        
+        # 将同步迭代器异步化
+        def _next_chunk(iterator):
+            try:
+                return next(iterator)
+            except StopIteration:
+                return None
+        
+        iterator = iter(sync_stream)
+        while True:
+            chunk = await asyncio.to_thread(_next_chunk, iterator)
+            if chunk is None:
+                break
             yield chunk

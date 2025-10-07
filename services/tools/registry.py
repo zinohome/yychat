@@ -11,6 +11,9 @@ class ToolRegistry:
             raise TypeError(f"Only Tool subclasses can be registered, got {tool_class.__name__}")
         
         tool = tool_class()
+        # 如果工具已经注册，跳过（避免重复注册）
+        if tool.name in self._tools:
+            return
         self._tools[tool.name] = tool_class
     
     def get_tool(self, tool_name: str) -> Optional[Tool]:

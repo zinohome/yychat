@@ -103,10 +103,10 @@ await async_memory.add_message(
 
 ```bash
 # 查看详细错误
-python check_mem0_config.py
+python utils/check_mem0_config.py
 
 # 查看配置模板
-python check_mem0_config.py --template
+python utils/check_mem0_config.py --template
 ```
 
 ### 问题：测试失败
@@ -164,6 +164,6 @@ CHROMA_PERSIST_DIRECTORY=/data/chroma
 遇到问题？
 
 1. 查看 [详细文档](./MEMORY_MODE_GUIDE.md)
-2. 运行 `python check_mem0_config.py` 诊断
+2. 运行 `python utils/check_mem0_config.py` 诊断
 3. 检查 `logs/app.log` 日志
 

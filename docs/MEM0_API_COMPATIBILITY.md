@@ -183,7 +183,7 @@ export MEMO_USE_LOCAL=false
 export MEM0_API_KEY=your_api_key
 
 # 2. 运行测试
-python check_mem0_config.py
+python utils/check_mem0_config.py
 ```
 
 如果配置正确，应该看到：

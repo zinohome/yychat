@@ -15,8 +15,12 @@ class TimeTool(Tool):
     
     @property
     def parameters(self) -> Dict[str, Any]:
-        # 这个工具不需要参数
-        return {}
+        # 这个工具不需要参数，但需要返回符合 OpenAI schema 的空参数定义
+        return {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
     
     async def execute(self, params: Dict[str, Any]) -> Dict[str, Any]:
         # 获取上海时区的当前时间
@@ -32,5 +36,5 @@ class TimeTool(Tool):
             "timestamp": current_time.timestamp()
         }
 
-# 注册工具
-#tool_registry.register(TimeTool)
+# 注册工具（传入类，不是实例）
+tool_registry.register(TimeTool)
