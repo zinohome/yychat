@@ -96,7 +96,7 @@ class Config:
     
     # 记忆管理配置
     MEMORY_RETRIEVAL_LIMIT = int(os.getenv("MEMORY_RETRIEVAL_LIMIT", "5"))
-    MEMORY_RETRIEVAL_TIMEOUT = float(os.getenv("MEMORY_RETRIEVAL_TIMEOUT", "2.0"))
+    MEMORY_RETRIEVAL_TIMEOUT = float(os.getenv("MEMORY_RETRIEVAL_TIMEOUT", "0.5"))  # 优化后默认0.5秒
     ENABLE_MEMORY_RETRIEVAL = os.getenv("ENABLE_MEMORY_RETRIEVAL", "true").lower() == "true"
     
     # 流式响应优化配置
@@ -105,6 +105,12 @@ class Config:
     # 控制会话中写入memory的时机
     # 可选值: both(同时保存用户输入和助手回复), user_only(只保存用户输入), assistant_only(只保存助手回复)
     MEMORY_SAVE_MODE = os.getenv("MEMORY_SAVE_MODE", "both")
+    
+    # 性能监控配置
+    ENABLE_PERFORMANCE_MONITOR = os.getenv("ENABLE_PERFORMANCE_MONITOR", "true").lower() == "true"
+    PERFORMANCE_LOG_ENABLED = os.getenv("PERFORMANCE_LOG_ENABLED", "true").lower() == "true"
+    PERFORMANCE_MAX_HISTORY = int(os.getenv("PERFORMANCE_MAX_HISTORY", "1000"))
+    PERFORMANCE_SAMPLING_RATE = float(os.getenv("PERFORMANCE_SAMPLING_RATE", "1.0"))  # 1.0 = 100%采样
     
 # 创建配置实例
 def get_config():

@@ -10,6 +10,7 @@ import uvicorn
 from config.config import get_config
 from utils.log import log
 from core.chat_memory import get_async_chat_memory
+from utils.performance import get_performance_monitor, performance_monitor
 from core.personality_manager import PersonalityManager
 from services.tools.registry import tool_registry
 # 添加工具自动发现导入
@@ -107,6 +108,14 @@ async def startup_event():
     # 自动发现并注册所有工具
     registered_count = ToolDiscoverer.register_discovered_tools()
     log.debug(f"自动注册了 {registered_count} 个工具")
+    
+    # 初始化性能监控
+    if config.ENABLE_PERFORMANCE_MONITOR:
+        log.info(f"✅ 性能监控已启用 (采样率: {config.PERFORMANCE_SAMPLING_RATE*100:.0f}%, 历史记录: {config.PERFORMANCE_MAX_HISTORY}条)")
+        # 设置监控器的最大历史记录数
+        performance_monitor._max_history = config.PERFORMANCE_MAX_HISTORY
+    else:
+        log.info("⚪ 性能监控已禁用")
     
     # 初始化并注册MCP工具
     try:
@@ -422,6 +431,40 @@ async def call_tool(request: ToolCallRequest, api_key: str = Depends(verify_api_
         }
     except Exception as e:
         log.error(f"Tool call error: {e}")
+        raise HTTPException(status_code=500, detail={"error": {"message": str(e), "type": "server_error"}})
+
+# 性能监控API
+@app.get("/v1/performance/stats", tags=["Monitoring"])
+async def get_performance_stats(api_key: str = Depends(verify_api_key)):
+    """获取性能统计信息"""
+    try:
+        monitor = get_performance_monitor()
+        stats = monitor.get_statistics()
+        return stats
+    except Exception as e:
+        log.error(f"Failed to get performance stats: {e}")
+        raise HTTPException(status_code=500, detail={"error": {"message": str(e), "type": "server_error"}})
+
+@app.get("/v1/performance/recent", tags=["Monitoring"])
+async def get_recent_performance(count: int = 10, api_key: str = Depends(verify_api_key)):
+    """获取最近的性能指标"""
+    try:
+        monitor = get_performance_monitor()
+        recent = monitor.get_recent_metrics(count)
+        return {"count": len(recent), "metrics": recent}
+    except Exception as e:
+        log.error(f"Failed to get recent performance: {e}")
+        raise HTTPException(status_code=500, detail={"error": {"message": str(e), "type": "server_error"}})
+
+@app.delete("/v1/performance/clear", tags=["Monitoring"])
+async def clear_performance_data(api_key: str = Depends(verify_api_key)):
+    """清除性能监控数据"""
+    try:
+        monitor = get_performance_monitor()
+        monitor.clear()
+        return {"success": True, "message": "性能监控数据已清除"}
+    except Exception as e:
+        log.error(f"Failed to clear performance data: {e}")
         raise HTTPException(status_code=500, detail={"error": {"message": str(e), "type": "server_error"}})
 
 # 启动服务器

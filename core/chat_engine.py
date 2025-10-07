@@ -18,7 +18,9 @@ from core.request_builder import build_request_params
 from core.tools_adapter import normalize_tool_calls, build_tool_response_messages
 from core.token_budget import should_include_memory
 from core.prompt_builder import compose_system_prompt
-
+# 性能监控
+from utils.performance import performance_monitor, PerformanceMetrics
+import uuid
 
 
 config = get_config()
@@ -60,6 +62,15 @@ class ChatEngine:
                                stream: Optional[bool] = None) -> Any:
         # 记录总请求处理开始时间
         total_start_time = time.time()
+        
+        # 创建性能指标对象
+        metrics = PerformanceMetrics(
+            request_id=str(uuid.uuid4())[:8],
+            timestamp=total_start_time,
+            stream=stream if stream is not None else config.STREAM_DEFAULT,
+            use_tools=use_tools if use_tools is not None else config.USE_TOOLS_DEFAULT,
+            personality_id=personality_id
+        )
         try:
             # 验证输入参数
             if not messages or not isinstance(messages, list):
@@ -119,7 +130,13 @@ class ChatEngine:
             
             # 从记忆中检索相关内容
             if config.ENABLE_MEMORY_RETRIEVAL and conversation_id != "default" and messages_copy:
+                memory_start = time.time()
                 relevant_memories = await self.async_chat_memory.get_relevant_memory(conversation_id, messages_copy[-1]["content"])
+                metrics.memory_retrieval_time = time.time() - memory_start
+                
+                # 检查是否命中缓存（通过检索时间判断）
+                metrics.memory_cache_hit = metrics.memory_retrieval_time < 0.01  # 小于10ms认为是缓存命中
+                
                 if relevant_memories:
                     memory_text = "\n".join(relevant_memories)
                     memory_section = f"参考记忆：\n{memory_text}"
@@ -164,9 +181,16 @@ class ChatEngine:
             log.debug(f"总请求处理时间一: {time.time() - total_start_time:.2f}秒")
             if stream:
                 # 直接返回异步生成器方法调用
-                return self._generate_streaming_response(request_params, conversation_id, messages, personality_id)
+                return self._generate_streaming_response(request_params, conversation_id, messages, personality_id, metrics)
             else:
-                return await self._generate_non_streaming_response(request_params, conversation_id, messages, personality_id)
+                result = await self._generate_non_streaming_response(request_params, conversation_id, messages, personality_id, metrics)
+                
+                # 记录性能指标
+                metrics.total_time = time.time() - total_start_time
+                if config.ENABLE_PERFORMANCE_MONITOR:
+                    performance_monitor.record(metrics, log_enabled=config.PERFORMANCE_LOG_ENABLED)
+                
+                return result
         except Exception as e:
             log.error(f"Error in generate_response: {e}")
             # 返回适当的错误响应对象，而不是简单的错误字典
@@ -189,7 +213,8 @@ class ChatEngine:
         request_params: Dict[str, Any],
         conversation_id: str,
         original_messages: List[Dict[str, str]],
-        personality_id: Optional[str] = None
+        personality_id: Optional[str] = None,
+        metrics: Optional[PerformanceMetrics] = None
     ) -> Dict[str, Any]:
         try:
             # 调用异步OpenAI API
@@ -254,7 +279,8 @@ class ChatEngine:
         request_params: Dict[str, Any],
         conversation_id: str,
         original_messages: List[Dict[str, str]],
-        personality_id: Optional[str] = None
+        personality_id: Optional[str] = None,
+        metrics: Optional[PerformanceMetrics] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
         try:
             # 记录API调用开始时间
@@ -446,12 +472,12 @@ class ChatEngine:
                     ))
                 
                 # 发送结束标志
-                yield {
-                    "role": "assistant",
+                    yield {
+                        "role": "assistant",
                     "content": "",
-                    "finish_reason": "stop",
-                    "stream": True
-                }
+                        "finish_reason": "stop",
+                        "stream": True
+                    }
             else:
                 # 保存到记忆 - 使用原生异步API
                 if conversation_id and full_content:

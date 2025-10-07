@@ -1,9 +1,13 @@
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional, Union
+from config.config import get_config
+
+# 获取配置
+config = get_config()
 
 # 聊天完成请求模型
 class ChatCompletionRequest(BaseModel):
-    model: str = Field(..., description="使用的模型名称")
+    model: str = Field(default=config.OPENAI_MODEL, description="使用的模型名称，默认使用配置中的模型")
     messages: List[Dict[str, str]] = Field(..., description="消息历史")
     temperature: float = Field(default=0.7, description="采样温度")
     max_tokens: Optional[int] = Field(default=None, description="最大生成token数")

@@ -424,6 +424,38 @@ class AsyncChatMemory:
             log.debug("异步消息添加成功")
         except Exception as e:
             log.error(f"Failed to add message asynchronously: {e}")
+    
+    async def add_messages_batch(self, conversation_id: str, messages: list):
+        """异步批量添加消息"""
+        try:
+            # 清除缓存
+            self._invalidate_cache(conversation_id)
+            
+            for message in messages:
+                metadata = {"role": message["role"]}
+                if "timestamp" in message and message["timestamp"] is not None:
+                    metadata["timestamp"] = message["timestamp"]
+                
+                if self.is_local:
+                    await self.memory.add(
+                        message["content"],
+                        user_id=conversation_id,
+                        metadata=metadata
+                    )
+                else:
+                    await self.memory.add(
+                        messages=[{
+                            "role": message["role"],
+                            "content": message["content"]
+                        }],
+                        user_id=conversation_id,
+                        metadata=metadata
+                    )
+            
+            log.debug(f"异步批量添加 {len(messages)} 条消息成功: conversation_id={conversation_id}")
+        except Exception as e:
+            log.error(f"异步批量添加消息失败: {e}")
+            raise
 
 
 # 全局实例
