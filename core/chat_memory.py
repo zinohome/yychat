@@ -1,8 +1,6 @@
 import os
 from typing import Optional
 import threading
-from mem0 import Memory, AsyncMemory
-from mem0.configs.base import MemoryConfig
 from config.config import get_config
 from utils.log import log
 import asyncio
@@ -11,37 +9,59 @@ class ChatMemory:
     def __init__(self, memory=None):
         # 在__init__方法内获取配置
         self.config = get_config()  # 保存配置为实例变量
+        self.is_local = self.config.MEMO_USE_LOCAL
         
         # 如果没有提供memory对象，创建一个新的
         if memory is None:
-            # 正确创建MemoryConfig对象来配置Memory，使用path而不是persist_directory
-            memory_config = MemoryConfig(
-                llm={
-                    "provider": self.config.MEM0_LLM_PROVIDER,
-                    "config": {
-                        "model": self.config.MEM0_LLM_CONFIG_MODEL, 
-                        "max_tokens": self.config.MEM0_LLM_CONFIG_MAX_TOKENS
-                    }
-                },
-                vector_store={
-                    "provider": "chroma",
-                    "config": {
-                        "collection_name": self.config.CHROMA_COLLECTION_NAME,
-                        "path": self.config.CHROMA_PERSIST_DIRECTORY
-                    }
-                }
-            )
-            
-            log.debug(f"初始化Memory，配置: {memory_config}")
-            # 使用MemoryConfig对象初始化Memory
-            self.memory = Memory(config=memory_config)
-            log.debug(f"成功创建Memory实例: {self.memory}")
-            
-            # 确保持久化目录存在
-            os.makedirs(self.config.CHROMA_PERSIST_DIRECTORY, exist_ok=True)
+            self._init_memory()
         else:
             # 使用提供的memory对象
             self.memory = memory
+    
+    def _init_memory(self):
+        """根据配置初始化Memory实例（本地或API模式）"""
+        try:
+            if self.is_local:
+                # 本地模式：使用 Memory + ChromaDB
+                from mem0 import Memory
+                from mem0.configs.base import MemoryConfig
+                
+                memory_config = MemoryConfig(
+                    llm={
+                        "provider": self.config.MEM0_LLM_PROVIDER,
+                        "config": {
+                            "model": self.config.MEM0_LLM_CONFIG_MODEL, 
+                            "max_tokens": self.config.MEM0_LLM_CONFIG_MAX_TOKENS
+                        }
+                    },
+                    vector_store={
+                        "provider": "chroma",
+                        "config": {
+                            "collection_name": self.config.CHROMA_COLLECTION_NAME,
+                            "path": self.config.CHROMA_PERSIST_DIRECTORY
+                        }
+                    }
+                )
+                
+                log.info(f"使用本地模式初始化Memory，配置: {memory_config}")
+                self.memory = Memory(config=memory_config)
+                log.info(f"成功创建本地Memory实例")
+                
+                # 确保持久化目录存在
+                os.makedirs(self.config.CHROMA_PERSIST_DIRECTORY, exist_ok=True)
+            else:
+                # API模式：使用 MemoryClient
+                from mem0 import MemoryClient
+                
+                if not self.config.MEM0_API_KEY:
+                    raise ValueError("API模式需要配置 MEM0_API_KEY")
+                
+                log.info(f"使用API模式初始化MemoryClient")
+                self.memory = MemoryClient(api_key=self.config.MEM0_API_KEY)
+                log.info(f"成功创建API MemoryClient实例")
+        except Exception as e:
+            log.error(f"初始化Memory失败: {e}")
+            raise
 
     def _preprocess_query(self, query: str) -> str:
         """预处理查询文本以提高检索效率"""
@@ -63,11 +83,25 @@ class ChatMemory:
             if "timestamp" in message and message["timestamp"] is not None:
                 metadata["timestamp"] = message["timestamp"]
             
-            self.memory.add(
-                message["content"],
-                user_id=conversation_id,
-                metadata=metadata
-            )
+            # API 模式和本地模式的参数有所不同
+            if self.is_local:
+                # 本地模式：使用 Memory.add()
+                self.memory.add(
+                    message["content"],
+                    user_id=conversation_id,
+                    metadata=metadata
+                )
+            else:
+                # API 模式：使用 MemoryClient.add()
+                # API 需要 messages 参数而不是直接的 content
+                self.memory.add(
+                    messages=[{
+                        "role": message["role"],
+                        "content": message["content"]
+                    }],
+                    user_id=conversation_id,
+                    metadata=metadata
+                )
             log.debug("消息添加成功")
         except Exception as e:
             log.error(f"Failed to add message to memory: {e}", exc_info=True)
@@ -181,22 +215,59 @@ class AsyncChatMemory:
     def __init__(self, async_memory=None, config=None):
         # 如果提供了config参数，使用它；否则使用get_config()获取默认配置
         self.config = config if config is not None else get_config()
-        
-        # 确保持久化目录存在
-        os.makedirs(self.config.CHROMA_PERSIST_DIRECTORY, exist_ok=True)
+        self.is_local = self.config.MEMO_USE_LOCAL
         
         # 如果没有提供async_memory对象，创建一个新的
         if async_memory is None:
-            # 传递config参数给get_memory_config函数
-            memory_config = get_memory_config(self.config)
-            
-            log.debug(f"初始化AsyncMemory，配置: {memory_config}")
-            # 使用MemoryConfig对象初始化AsyncMemory
-            self.async_memory = AsyncMemory(config=memory_config)
-            log.debug(f"成功创建AsyncMemory实例: {self.async_memory}")
+            self._init_async_memory()
         else:
             # 使用提供的async_memory对象
             self.async_memory = async_memory
+    
+    def _init_async_memory(self):
+        """根据配置初始化AsyncMemory实例（本地或API模式）"""
+        try:
+            if self.is_local:
+                # 本地模式：使用 AsyncMemory + ChromaDB
+                from mem0 import AsyncMemory
+                from mem0.configs.base import MemoryConfig
+                
+                # 确保持久化目录存在
+                os.makedirs(self.config.CHROMA_PERSIST_DIRECTORY, exist_ok=True)
+                
+                memory_config = MemoryConfig(
+                    llm={
+                        "provider": self.config.MEM0_LLM_PROVIDER,
+                        "config": {
+                            "model": self.config.MEM0_LLM_CONFIG_MODEL,
+                            "max_tokens": self.config.MEM0_LLM_CONFIG_MAX_TOKENS
+                        }
+                    },
+                    vector_store={
+                        "provider": "chroma",
+                        "config": {
+                            "collection_name": self.config.CHROMA_COLLECTION_NAME,
+                            "path": self.config.CHROMA_PERSIST_DIRECTORY
+                        }
+                    }
+                )
+                
+                log.info(f"使用本地模式初始化AsyncMemory，配置: {memory_config}")
+                self.async_memory = AsyncMemory(config=memory_config)
+                log.info(f"成功创建本地AsyncMemory实例")
+            else:
+                # API模式：使用 AsyncMemoryClient
+                from mem0 import AsyncMemoryClient
+                
+                if not self.config.MEM0_API_KEY:
+                    raise ValueError("API模式需要配置 MEM0_API_KEY")
+                
+                log.info(f"使用API模式初始化AsyncMemoryClient")
+                self.async_memory = AsyncMemoryClient(api_key=self.config.MEM0_API_KEY)
+                log.info(f"成功创建API AsyncMemoryClient实例")
+        except Exception as e:
+            log.error(f"初始化AsyncMemory失败: {e}")
+            raise
     
     def _preprocess_query(self, query: str) -> str:
         """预处理查询文本以提高检索效率"""
@@ -218,35 +289,29 @@ class AsyncChatMemory:
             if "timestamp" in message and message["timestamp"] is not None:
                 metadata["timestamp"] = message["timestamp"]
             
-            await self.async_memory.add(
-                message["content"],
-                user_id=conversation_id,
-                metadata=metadata
-            )
+            # API 模式和本地模式的参数有所不同
+            if self.is_local:
+                # 本地模式：使用 AsyncMemory.add()
+                await self.async_memory.add(
+                    message["content"],
+                    user_id=conversation_id,
+                    metadata=metadata
+                )
+            else:
+                # API 模式：使用 AsyncMemoryClient.add()
+                # API 需要 messages 参数而不是直接的 content
+                await self.async_memory.add(
+                    messages=[{
+                        "role": message["role"],
+                        "content": message["content"]
+                    }],
+                    user_id=conversation_id,
+                    metadata=metadata
+                )
             log.debug("异步消息添加成功")
         except Exception as e:
             log.error(f"Failed to add message to async memory: {e}", exc_info=True)
             # 可以选择是否抛出异常，这里选择记录错误但不中断程序
-    
-    # 添加缺失的get_memory_config函数
-    def get_memory_config(config):
-        """创建并返回mem0的MemoryConfig对象"""
-        return MemoryConfig(
-            llm={
-                "provider": config.MEM0_LLM_PROVIDER,
-                "config": {
-                    "model": config.MEM0_LLM_CONFIG_MODEL,
-                    "max_tokens": config.MEM0_LLM_CONFIG_MAX_TOKENS
-                }
-            },
-            vector_store={
-                "provider": "chroma",
-                "config": {
-                    "collection_name": config.CHROMA_COLLECTION_NAME,
-                    "path": config.CHROMA_PERSIST_DIRECTORY
-                }
-            }
-        )
     
     # 同时优化AsyncChatMemory.add_messages_batch方法，改进对add返回值的处理
     async def add_messages_batch(self, conversation_id: str, messages: list):
@@ -282,12 +347,24 @@ class AsyncChatMemory:
                 
                 # 修复：添加await关键字等待异步方法执行
                 try:
-                    # 使用更直接的方式调用add方法，确保必要参数都已提供
-                    result = await self.async_memory.add(
-                        formatted_content,
-                        user_id=conversation_id,
-                        metadata=metadata
-                    )
+                    # API 模式和本地模式的参数有所不同
+                    if self.is_local:
+                        # 本地模式：使用直接的 content
+                        result = await self.async_memory.add(
+                            formatted_content,
+                            user_id=conversation_id,
+                            metadata=metadata
+                        )
+                    else:
+                        # API 模式：使用 messages 列表
+                        result = await self.async_memory.add(
+                            messages=[{
+                                "role": message["role"],
+                                "content": formatted_content
+                            }],
+                            user_id=conversation_id,
+                            metadata=metadata
+                        )
                     # 改进日志记录，显示返回值的类型和内容
                     log.debug(f"异步添加结果类型: {type(result)}, 结果内容: {result}")
                     
@@ -400,22 +477,32 @@ def get_async_chat_memory():
 
 # 修改get_memory_config函数，接受可选的config参数
 def get_memory_config(config=None):
-    """获取统一的MemoryConfig配置"""
+    """
+    获取统一的MemoryConfig配置（仅用于本地模式）
+    API模式下不需要此函数
+    """
     # 如果提供了config参数，使用它；否则使用get_config()获取默认配置
     config = config if config is not None else get_config()
-    return MemoryConfig(
-        llm={
-            "provider": config.MEM0_LLM_PROVIDER,
-            "config": {
-                "model": config.MEM0_LLM_CONFIG_MODEL,
-                "max_tokens": config.MEM0_LLM_CONFIG_MAX_TOKENS
+    
+    # 只有在本地模式下才需要MemoryConfig
+    if config.MEMO_USE_LOCAL:
+        from mem0.configs.base import MemoryConfig
+        return MemoryConfig(
+            llm={
+                "provider": config.MEM0_LLM_PROVIDER,
+                "config": {
+                    "model": config.MEM0_LLM_CONFIG_MODEL,
+                    "max_tokens": config.MEM0_LLM_CONFIG_MAX_TOKENS
+                }
+            },
+            vector_store={
+                "provider": "chroma",
+                "config": {
+                    "collection_name": config.CHROMA_COLLECTION_NAME,
+                    "path": config.CHROMA_PERSIST_DIRECTORY
+                }
             }
-        },
-        vector_store={
-            "provider": "chroma",
-            "config": {
-                "collection_name": config.CHROMA_COLLECTION_NAME,
-                "path": config.CHROMA_PERSIST_DIRECTORY
-            }
-        }
-    )
+        )
+    else:
+        # API模式下返回None，因为不需要MemoryConfig
+        return None
