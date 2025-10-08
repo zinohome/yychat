@@ -28,3 +28,5 @@ volumes
 config.yaml
 .DS_Store
 /chroma_db/
+# Archive directory
+archive/
