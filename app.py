@@ -1,11 +1,13 @@
 import json
 import asyncio
 from fastapi import FastAPI, HTTPException, Depends, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, HTMLResponse, FileResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 from typing import List, Dict, Any, Optional, Union
 import uvicorn
+import os
 # 修改导入路径
 from config.config import get_config
 from utils.log import log
@@ -20,6 +22,9 @@ from services.mcp.discovery import discover_and_register_mcp_tools
 from services.mcp.manager import mcp_manager
 # 添加ToolManager导入用于工具调用
 from services.tools.manager import ToolManager
+# 添加引擎管理器导入
+from core.engine_manager import get_engine_manager, get_current_engine
+from core.chat_engine import ChatEngine
 
 # 导入Pydantic模型
 from schemas.api_schemas import (
@@ -38,16 +43,23 @@ warnings.filterwarnings("ignore", category=DeprecationWarning, message=".*model_
 warnings.filterwarnings("ignore", category=DeprecationWarning, message=".*on_event.*")
 config = get_config()
 
+# 使用引擎管理器（统一入口）
+engine_manager = get_engine_manager()
+
 # 根据配置选择使用的聊天引擎
 if config.CHAT_ENGINE == "mem0_proxy":
     from core.mem0_proxy import get_mem0_proxy
     # 初始化Mem0代理引擎（单例）
-    chat_engine = get_mem0_proxy()
-    log.info("Using Mem0 Proxy as chat engine")
+    mem0_engine = get_mem0_proxy()
+    engine_manager.register_engine("mem0_proxy", mem0_engine)
+    log.info("✅ Mem0 Proxy engine registered")
+    chat_engine = mem0_engine  # 保持向后兼容
 else:
     # 默认使用chat_engine
-    from core.chat_engine import chat_engine
-    log.info("Using default Chat Engine")
+    chat_engine_instance = ChatEngine()
+    engine_manager.register_engine("chat_engine", chat_engine_instance)
+    log.info("✅ Chat Engine registered")
+    chat_engine = chat_engine_instance  # 保持向后兼容
 
 # 创建HTTPBearer安全方案
 bearer_scheme = HTTPBearer()
@@ -73,6 +85,9 @@ app = FastAPI(
         }
     }
 )
+
+# 挂载静态文件目录
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # 初始化人格管理器
 personality_manager = PersonalityManager()
@@ -445,6 +460,18 @@ async def get_performance_stats(api_key: str = Depends(verify_api_key)):
         log.error(f"Failed to get performance stats: {e}")
         raise HTTPException(status_code=500, detail={"error": {"message": str(e), "type": "server_error"}})
 
+# Dashboard专用API（无需认证，仅用于Dashboard）
+@app.get("/api/dashboard/stats", tags=["Dashboard"])
+async def get_dashboard_stats():
+    """获取Dashboard性能统计信息（无需认证）"""
+    try:
+        monitor = get_performance_monitor()
+        stats = monitor.get_statistics()
+        return stats
+    except Exception as e:
+        log.error(f"Failed to get dashboard stats: {e}")
+        raise HTTPException(status_code=500, detail={"error": {"message": str(e), "type": "server_error"}})
+
 @app.get("/v1/performance/recent", tags=["Monitoring"])
 async def get_recent_performance(count: int = 10, api_key: str = Depends(verify_api_key)):
     """获取最近的性能指标"""
@@ -466,6 +493,80 @@ async def clear_performance_data(api_key: str = Depends(verify_api_key)):
     except Exception as e:
         log.error(f"Failed to clear performance data: {e}")
         raise HTTPException(status_code=500, detail={"error": {"message": str(e), "type": "server_error"}})
+
+# 引擎管理API
+@app.get("/v1/engines/list", tags=["Engine"])
+async def list_engines(api_key: str = Depends(verify_api_key)):
+    """列出所有已注册的引擎"""
+    try:
+        engines = await engine_manager.list_engines()
+        return {
+            "success": True,
+            "current_engine": engine_manager.current_engine_name,
+            "engines": engines,
+            "count": len(engines)
+        }
+    except Exception as e:
+        log.error(f"Failed to list engines: {e}")
+        raise HTTPException(status_code=500, detail={"error": {"message": str(e), "type": "server_error"}})
+
+@app.get("/v1/engines/current", tags=["Engine"])
+async def get_current_engine_info(api_key: str = Depends(verify_api_key)):
+    """获取当前引擎信息"""
+    try:
+        current_engine = get_current_engine()
+        if not current_engine:
+            raise HTTPException(status_code=404, detail={"error": {"message": "No engine is currently active", "type": "not_found"}})
+        
+        info = await current_engine.get_engine_info()
+        return {
+            "success": True,
+            "engine": info
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Failed to get current engine info: {e}")
+        raise HTTPException(status_code=500, detail={"error": {"message": str(e), "type": "server_error"}})
+
+@app.post("/v1/engines/switch", tags=["Engine"])
+async def switch_engine(engine_name: str, api_key: str = Depends(verify_api_key)):
+    """切换引擎"""
+    try:
+        result = await engine_manager.switch_engine(engine_name)
+        
+        if not result["success"]:
+            raise HTTPException(status_code=400, detail={"error": {"message": result["message"], "type": "validation_error"}})
+        
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Failed to switch engine: {e}")
+        raise HTTPException(status_code=500, detail={"error": {"message": str(e), "type": "server_error"}})
+
+@app.get("/v1/engines/health", tags=["Engine"])
+async def check_engines_health(api_key: str = Depends(verify_api_key)):
+    """检查所有引擎的健康状态"""
+    try:
+        health_status = await engine_manager.health_check_all()
+        return {
+            "success": True,
+            **health_status
+        }
+    except Exception as e:
+        log.error(f"Failed to check engines health: {e}")
+        raise HTTPException(status_code=500, detail={"error": {"message": str(e), "type": "server_error"}})
+
+# Dashboard路由
+@app.get("/dashboard", response_class=HTMLResponse, tags=["Dashboard"])
+async def get_dashboard():
+    """访问性能监控Dashboard"""
+    dashboard_path = os.path.join("static", "dashboard.html")
+    if os.path.exists(dashboard_path):
+        return FileResponse(dashboard_path)
+    else:
+        raise HTTPException(status_code=404, detail={"error": {"message": "Dashboard not found", "type": "not_found"}})
 
 # 启动服务器
 if __name__ == "__main__":

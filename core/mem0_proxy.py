@@ -11,6 +11,10 @@ from core.personality_manager import PersonalityManager
 from services.tools.manager import ToolManager
 from services.mcp.manager import mcp_manager
 from services.mcp.exceptions import MCPServiceError, MCPServerNotFoundError, MCPToolNotFoundError
+# BaseEngine接口
+from core.base_engine import BaseEngine, EngineCapabilities, EngineStatus
+# 工具规范化
+from core.tools_adapter import normalize_tool_calls, build_tool_response_messages
 
 
 class Mem0Client:
@@ -193,10 +197,12 @@ class ToolHandler:
             all_tools = get_available_tools()
 
             if not personality_id:
+                log.info(f"未指定personality，返回所有工具，共 {len(all_tools)} 个")
                 return all_tools
 
             personality = self.personality_manager.get_personality(personality_id)
             if not personality or not personality.allowed_tools:
+                log.info(f"personality {personality_id} 没有工具限制，返回所有工具，共 {len(all_tools)} 个")
                 return all_tools
 
             # 根据allowed_tools过滤工具
@@ -209,7 +215,7 @@ class ToolHandler:
 
             if allowed_tool_names:
                 filtered_tools = [tool for tool in all_tools if tool.get('function', {}).get('name') in allowed_tool_names]
-                log.debug(f"应用personality {personality_id} 的工具限制，允许的工具数量: {len(filtered_tools)}")
+                log.info(f"应用personality {personality_id} 的工具限制，允许的工具: {allowed_tool_names}, 过滤后数量: {len(filtered_tools)}/{len(all_tools)}")
                 return filtered_tools
             else:
                 log.warning(f"personality {personality_id} 的allowed_tools格式不正确，使用所有可用工具")
@@ -221,36 +227,34 @@ class ToolHandler:
     async def handle_tool_calls(self, tool_calls: List[Dict], conversation_id: str, original_messages: List[Dict], personality_id: Optional[str] = None) -> Dict[str, Any]:
         """处理工具调用（非流式）"""
         try:
+            # 使用工具适配器规范化工具调用
+            normalized_calls = normalize_tool_calls(tool_calls)
+            
             # 准备工具调用列表
             calls_to_execute = []
-            for tool_call in tool_calls:
+            for call in normalized_calls:
+                # 安全地解析JSON参数
+                args_str = call["function"]["arguments"]
+                try:
+                    parameters = json.loads(args_str) if args_str else {}
+                except json.JSONDecodeError as e:
+                    log.error(f"工具参数JSON解析失败: {args_str}, 错误: {e}")
+                    parameters = {}
+                
                 calls_to_execute.append({
-                    "name": tool_call["function"]["name"],
-                    "parameters": json.loads(tool_call["function"]["arguments"])
+                    "name": call["function"]["name"],
+                    "parameters": parameters
                 })
 
             # 并行执行所有工具调用
             tool_results = await self.tool_manager.execute_tools_concurrently(calls_to_execute)
 
-            # 构建工具调用响应消息
-            tool_response_messages = []
-            for i, result in enumerate(tool_results):
-                tool_call = tool_calls[i]
-                if result["success"]:
-                    content = f"工具 '{result['tool_name']}' 调用结果: {json.dumps(result['result'])}"
-                else:
-                    content = f"工具 '{result['tool_name']}' 调用失败: {result.get('error', '未知错误')}"
-
-                tool_response_messages.append({
-                    "tool_call_id": tool_call["id"],
-                    "role": "tool",
-                    "name": tool_call["function"]["name"],
-                    "content": content
-                })
+            # 使用工具适配器构建工具响应消息
+            tool_response_messages = build_tool_response_messages(normalized_calls, tool_results)
 
             # 将工具调用结果添加到消息历史中，再次调用模型
             new_messages = original_messages.copy()
-            new_messages.append({"role": "assistant", "tool_calls": tool_calls})
+            new_messages.append({"role": "assistant", "tool_calls": normalized_calls})
             new_messages.extend(tool_response_messages)
 
             # 重新生成响应（递归调用，但不使用工具）
@@ -606,7 +610,7 @@ class FallbackHandler:
             return {"role": "assistant", "content": f"发生内部错误: {str(e)}"}
 
 
-class Mem0ChatEngine:
+class Mem0ChatEngine(BaseEngine):
     """基于Mem0官方Proxy接口的聊天引擎"""
 
     def __init__(self, custom_config=None):
@@ -704,23 +708,78 @@ class Mem0ChatEngine:
         finally:
             log.debug(f"Mem0代理响应生成耗时: {time.time() - start_time:.3f}秒")
 
-    def clear_conversation_memory(self, conversation_id: str):
+    async def clear_conversation_memory(self, conversation_id: str) -> Dict[str, Any]:
         """清除指定会话的记忆"""
         try:
+            # 获取当前记忆数量
+            current_memories = self.memory_handler.chat_memory.get_memory(conversation_id)
+            count_before = len(current_memories) if current_memories else 0
+            
+            # 清除记忆
             self.memory_handler.chat_memory.clear_memory(conversation_id)
-            log.debug(f"Cleared memory for conversation: {conversation_id}")
+            log.info(f"已清除会话 {conversation_id} 的 {count_before} 条记忆")
+            
+            return {
+                "success": True,
+                "conversation_id": conversation_id,
+                "deleted_count": count_before,
+                "message": f"已清除会话 {conversation_id} 的 {count_before} 条记忆"
+            }
         except Exception as e:
-            log.error(f"Failed to clear memory: {e}")
+            log.error(f"清除会话记忆失败: {e}")
+            return {
+                "success": False,
+                "conversation_id": conversation_id,
+                "deleted_count": 0,
+                "message": f"清除失败: {str(e)}"
+            }
 
-    def get_conversation_memory(self, conversation_id: str) -> List[Dict[str, Any]]:
+    async def get_conversation_memory(
+        self,
+        conversation_id: str,
+        limit: Optional[int] = None
+    ) -> Dict[str, Any]:
         """获取指定会话的记忆"""
         try:
-            memories = self.memory_handler.chat_memory.get_memory(conversation_id)
-            log.debug(f"Retrieved {len(memories)} memories for conversation: {conversation_id}")
-            return memories
+            # 获取所有记忆
+            all_memories = self.memory_handler.chat_memory.get_memory(conversation_id)
+            
+            if not all_memories:
+                return {
+                    "success": True,
+                    "conversation_id": conversation_id,
+                    "memories": [],
+                    "total_count": 0,
+                    "returned_count": 0
+                }
+            
+            total_count = len(all_memories)
+            
+            # 应用limit
+            if limit and limit > 0:
+                memories = all_memories[:limit]
+            else:
+                memories = all_memories
+            
+            log.info(f"获取会话 {conversation_id} 的记忆，总数: {total_count}, 返回: {len(memories)}")
+            
+            return {
+                "success": True,
+                "conversation_id": conversation_id,
+                "memories": memories,
+                "total_count": total_count,
+                "returned_count": len(memories)
+            }
         except Exception as e:
-            log.error(f"Failed to get memory: {e}")
-            return []
+            log.error(f"获取会话记忆失败: {e}")
+            return {
+                "success": False,
+                "conversation_id": conversation_id,
+                "memories": [],
+                "total_count": 0,
+                "returned_count": 0,
+                "error": str(e)
+            }
 
     def call_mcp_service(self, tool_name: str = None, params: dict = None, 
                          service_name: str = None, method_name: str = None, 
@@ -766,6 +825,128 @@ class Mem0ChatEngine:
         except Exception as e:
             log.error(f"Unexpected error when calling MCP service: {str(e)}")
             return {"success": False, "error": f"调用MCP服务时发生未知错误: {str(e)}"}
+    
+    # ========== BaseEngine接口实现 ==========
+    
+    async def get_engine_info(self) -> Dict[str, Any]:
+        """获取引擎信息"""
+        return {
+            "name": "mem0_proxy",
+            "version": "1.0.0",
+            "features": [
+                EngineCapabilities.MEMORY,
+                EngineCapabilities.TOOLS,
+                EngineCapabilities.PERSONALITY,
+                EngineCapabilities.STREAMING,
+                EngineCapabilities.FALLBACK,
+                EngineCapabilities.MCP_INTEGRATION
+            ],
+            "status": EngineStatus.HEALTHY,
+            "description": "Mem0代理引擎，自动Memory管理，支持降级到OpenAI"
+        }
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """健康检查"""
+        timestamp = time.time()
+        errors = []
+        
+        # 检查Mem0客户端
+        mem0_healthy = True
+        try:
+            mem0_client = self.mem0_client.get_client()
+            if not mem0_client:
+                mem0_healthy = False
+                errors.append("Mem0客户端未初始化")
+        except Exception as e:
+            mem0_healthy = False
+            errors.append(f"Mem0客户端检查失败: {str(e)}")
+        
+        # 检查OpenAI客户端（降级备份）
+        openai_healthy = True
+        try:
+            openai_client = self.openai_client.get_client()
+            if not openai_client:
+                openai_healthy = False
+                errors.append("OpenAI客户端未初始化")
+        except Exception as e:
+            openai_healthy = False
+            errors.append(f"OpenAI客户端检查失败: {str(e)}")
+        
+        # 检查工具系统
+        tool_healthy = True
+        try:
+            tools = await self.tool_handler.get_allowed_tools()
+            if not tools:
+                log.warning("工具系统无可用工具")
+        except Exception as e:
+            tool_healthy = False
+            errors.append(f"工具系统检查失败: {str(e)}")
+        
+        # 检查人格系统
+        personality_healthy = True
+        try:
+            personalities = self.personality_handler.personality_manager.get_all_personalities()
+            if not personalities:
+                log.warning("人格系统无可用人格")
+        except Exception as e:
+            personality_healthy = False
+            errors.append(f"人格系统检查失败: {str(e)}")
+        
+        # 综合判断（至少有一个客户端健康即可）
+        all_healthy = (mem0_healthy or openai_healthy) and tool_healthy and personality_healthy
+        
+        return {
+            "healthy": all_healthy,
+            "timestamp": timestamp,
+            "details": {
+                "mem0_client": mem0_healthy,
+                "openai_client": openai_healthy,
+                "tool_system": tool_healthy,
+                "personality_system": personality_healthy
+            },
+            "errors": errors
+        }
+    
+    async def get_supported_personalities(self) -> List[Dict[str, Any]]:
+        """获取支持的人格列表"""
+        try:
+            personalities = self.personality_handler.personality_manager.get_all_personalities()
+            result = []
+            
+            for pid, pdata in personalities.items():
+                result.append({
+                    "id": pid,
+                    "name": pdata.get("name", pid),
+                    "description": pdata.get("system_prompt", "")[:100] + "...",  # 截取前100字符
+                    "allowed_tools": [tool.get("tool_name") or tool.get("name") for tool in pdata.get("allowed_tools", [])]
+                })
+            
+            return result
+        except Exception as e:
+            log.error(f"获取人格列表失败: {e}")
+            return []
+    
+    async def get_available_tools(self, personality_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """获取可用的工具列表（返回简化格式）"""
+        try:
+            # 获取OpenAI schema格式的工具
+            tools_schema = await self.tool_handler.get_allowed_tools(personality_id)
+            
+            # 转换为简化格式
+            result = []
+            for tool_schema in tools_schema:
+                if 'function' in tool_schema:
+                    func = tool_schema['function']
+                    result.append({
+                        "name": func.get('name', ''),
+                        "description": func.get('description', ''),
+                        "parameters": func.get('parameters', {})
+                    })
+            
+            return result
+        except Exception as e:
+            log.error(f"获取工具列表失败: {e}")
+            return []
 
 
 # 创建全局实例

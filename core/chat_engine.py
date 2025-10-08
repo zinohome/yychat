@@ -1,7 +1,7 @@
 import asyncio
 import time
 import json
-from typing import List, Dict, Any, Optional, AsyncGenerator
+from typing import List, Dict, Any, Optional, AsyncGenerator, Union
 from openai import OpenAI
 from config.config import get_config
 from utils.log import log
@@ -21,11 +21,13 @@ from core.prompt_builder import compose_system_prompt
 # 性能监控
 from utils.performance import performance_monitor, PerformanceMetrics
 import uuid
+# 基类导入
+from core.base_engine import BaseEngine, EngineCapabilities, EngineStatus
 
 
 config = get_config()
 
-class ChatEngine:
+class ChatEngine(BaseEngine):
     def __init__(self):
         # 初始化同步客户端
         self.sync_client = OpenAI(
@@ -149,15 +151,13 @@ class ChatEngine:
                         memory_section = ""
             elif not config.ENABLE_MEMORY_RETRIEVAL:
                 log.debug("Memory检索已禁用")
-            # 获取人格信息
-            allowed_tool_names = None
+            
+            # 获取人格的系统提示
             if personality_id:
                 try:
                     personality = self.personality_manager.get_personality(personality_id)
                     if personality:
                         personality_system = personality.system_prompt or ""
-                        if personality.allowed_tools:
-                            allowed_tool_names = [tool["tool_name"] for tool in personality.allowed_tools]
                 except Exception as e:
                     log.warning(f"获取人格时出错，忽略人格设置: {e}")
             
@@ -165,15 +165,15 @@ class ChatEngine:
             messages_copy = compose_system_prompt(messages_copy, personality_system, memory_section)
             log.debug(f"合成系统提示后消息: {messages_copy}")
             
-            # 使用新的请求构建器构建请求参数
-            all_tools_schema = tool_registry.get_functions_schema() if use_tools else None
+            # 使用新的方法获取允许的工具schema（已根据personality过滤）
+            allowed_tools_schema = await self.get_allowed_tools_schema(personality_id) if use_tools else None
             request_params = build_request_params(
                 model=config.OPENAI_MODEL,
                 temperature=float(config.OPENAI_TEMPERATURE),
                 messages=messages_copy,
                 use_tools=use_tools,
-                all_tools_schema=all_tools_schema,
-                allowed_tool_names=allowed_tool_names
+                all_tools_schema=allowed_tools_schema,
+                allowed_tool_names=None  # 不再需要单独传递，已在schema中过滤
             )
             
             log.debug(f"最终请求参数: {request_params}")
@@ -661,6 +661,257 @@ class ChatEngine:
             await self._async_save_message_to_memory(conversation_id, [message])
         except Exception as e:
             log.error(f"异步保存消息到记忆失败: {e}")
+    
+    # ========== BaseEngine接口实现 ==========
+    
+    async def get_engine_info(self) -> Dict[str, Any]:
+        """获取引擎信息"""
+        return {
+            "name": "chat_engine",
+            "version": "2.0.0",
+            "features": [
+                EngineCapabilities.MEMORY,
+                EngineCapabilities.TOOLS,
+                EngineCapabilities.PERSONALITY,
+                EngineCapabilities.STREAMING,
+                EngineCapabilities.PERFORMANCE_MONITORING,
+                EngineCapabilities.CACHE,
+                EngineCapabilities.MCP_INTEGRATION
+            ],
+            "status": EngineStatus.HEALTHY,
+            "description": "主聊天引擎，集成Memory缓存、性能监控、工具调用和MCP"
+        }
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """健康检查"""
+        timestamp = time.time()
+        errors = []
+        
+        # 检查OpenAI API
+        openai_healthy = True
+        try:
+            # 简单测试，不实际调用API
+            if not self.sync_client or not config.OPENAI_API_KEY:
+                openai_healthy = False
+                errors.append("OpenAI API配置不完整")
+        except Exception as e:
+            openai_healthy = False
+            errors.append(f"OpenAI API检查失败: {str(e)}")
+        
+        # 检查Memory系统
+        memory_healthy = True
+        try:
+            if not self.async_chat_memory:
+                memory_healthy = False
+                errors.append("Memory系统未初始化")
+        except Exception as e:
+            memory_healthy = False
+            errors.append(f"Memory系统检查失败: {str(e)}")
+        
+        # 检查工具系统
+        tool_healthy = True
+        try:
+            tool_count = len(tool_registry.list_tools())
+            if tool_count == 0:
+                log.warning("工具系统无可用工具")
+        except Exception as e:
+            tool_healthy = False
+            errors.append(f"工具系统检查失败: {str(e)}")
+        
+        # 检查人格系统
+        personality_healthy = True
+        try:
+            personalities = self.personality_manager.get_all_personalities()
+            if not personalities:
+                log.warning("人格系统无可用人格")
+        except Exception as e:
+            personality_healthy = False
+            errors.append(f"人格系统检查失败: {str(e)}")
+        
+        # 综合判断
+        all_healthy = openai_healthy and memory_healthy and tool_healthy and personality_healthy
+        
+        return {
+            "healthy": all_healthy,
+            "timestamp": timestamp,
+            "details": {
+                "openai_api": openai_healthy,
+                "memory_system": memory_healthy,
+                "tool_system": tool_healthy,
+                "personality_system": personality_healthy
+            },
+            "errors": errors
+        }
+    
+    async def clear_conversation_memory(self, conversation_id: str) -> Dict[str, Any]:
+        """清除指定会话的记忆"""
+        try:
+            # 获取当前记忆数量
+            current_memories = await self.async_chat_memory.get_all_memory(conversation_id)
+            count_before = len(current_memories) if current_memories else 0
+            
+            # 清除记忆
+            self.async_chat_memory.clear_conversation(conversation_id)
+            
+            return {
+                "success": True,
+                "conversation_id": conversation_id,
+                "deleted_count": count_before,
+                "message": f"已清除会话 {conversation_id} 的 {count_before} 条记忆"
+            }
+        except Exception as e:
+            log.error(f"清除会话记忆失败: {e}")
+            return {
+                "success": False,
+                "conversation_id": conversation_id,
+                "deleted_count": 0,
+                "message": f"清除失败: {str(e)}"
+            }
+    
+    async def get_conversation_memory(
+        self,
+        conversation_id: str,
+        limit: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """获取指定会话的记忆"""
+        try:
+            # 获取所有记忆
+            all_memories = await self.async_chat_memory.get_all_memory(conversation_id)
+            
+            if not all_memories:
+                return {
+                    "success": True,
+                    "conversation_id": conversation_id,
+                    "memories": [],
+                    "total_count": 0,
+                    "returned_count": 0
+                }
+            
+            total_count = len(all_memories)
+            
+            # 应用limit
+            if limit and limit > 0:
+                memories = all_memories[:limit]
+            else:
+                memories = all_memories
+            
+            return {
+                "success": True,
+                "conversation_id": conversation_id,
+                "memories": memories,
+                "total_count": total_count,
+                "returned_count": len(memories)
+            }
+        except Exception as e:
+            log.error(f"获取会话记忆失败: {e}")
+            return {
+                "success": False,
+                "conversation_id": conversation_id,
+                "memories": [],
+                "total_count": 0,
+                "returned_count": 0,
+                "error": str(e)
+            }
+    
+    async def get_supported_personalities(self) -> List[Dict[str, Any]]:
+        """获取支持的人格列表"""
+        try:
+            personalities = self.personality_manager.get_all_personalities()
+            result = []
+            
+            for pid, pdata in personalities.items():
+                result.append({
+                    "id": pid,
+                    "name": pdata.get("name", pid),
+                    "description": pdata.get("system_prompt", "")[:100] + "...",  # 截取前100字符
+                    "allowed_tools": [tool.get("tool_name") for tool in pdata.get("allowed_tools", [])]
+                })
+            
+            return result
+        except Exception as e:
+            log.error(f"获取人格列表失败: {e}")
+            return []
+    
+    async def get_available_tools(self, personality_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """获取可用的工具列表"""
+        try:
+            # 获取所有工具
+            all_tools = tool_registry.list_tools()
+            
+            # 如果指定了人格，过滤工具
+            if personality_id:
+                personality = self.personality_manager.get_personality(personality_id)
+                if personality and personality.get("allowed_tools"):
+                    allowed_tool_names = [tool["tool_name"] for tool in personality["allowed_tools"]]
+                    # 过滤工具
+                    all_tools = {name: tool for name, tool in all_tools.items() if name in allowed_tool_names}
+            
+            # 转换为列表格式
+            result = []
+            for name, tool_class in all_tools.items():
+                tool_instance = tool_class()
+                result.append({
+                    "name": tool_instance.name,
+                    "description": tool_instance.description,
+                    "parameters": tool_instance.parameters
+                })
+            
+            return result
+        except Exception as e:
+            log.error(f"获取工具列表失败: {e}")
+            return []
+    
+    async def get_allowed_tools_schema(self, personality_id: Optional[str] = None) -> List[Dict]:
+        """根据personality获取允许的工具（OpenAI schema格式）
+        
+        Args:
+            personality_id: 人格ID，如果为None则返回所有工具
+            
+        Returns:
+            List[Dict]: OpenAI函数schema格式的工具列表
+        """
+        try:
+            # 获取所有工具的OpenAI函数schema
+            all_tools_schema = tool_registry.get_functions_schema()
+            
+            # 如果没有指定personality，返回所有工具
+            if not personality_id:
+                log.info(f"未指定personality，返回所有工具，共 {len(all_tools_schema)} 个")
+                return all_tools_schema
+            
+            # 获取personality配置
+            personality = self.personality_manager.get_personality(personality_id)
+            if not personality or not personality.allowed_tools:
+                # 如果personality没有工具限制，返回所有工具
+                log.info(f"personality {personality_id} 没有工具限制，返回所有工具，共 {len(all_tools_schema)} 个")
+                return all_tools_schema
+            
+            # 提取允许的工具名称（兼容tool_name和name两种字段）
+            allowed_tool_names = []
+            for tool in personality.allowed_tools:
+                if 'tool_name' in tool:
+                    allowed_tool_names.append(tool['tool_name'])
+                elif 'name' in tool:
+                    allowed_tool_names.append(tool['name'])
+            
+            if not allowed_tool_names:
+                log.warning(f"personality {personality_id} 的allowed_tools格式不正确，使用所有可用工具")
+                return all_tools_schema
+            
+            # 根据allowed_tools过滤工具schema
+            filtered_tools = [
+                tool for tool in all_tools_schema 
+                if tool.get('function', {}).get('name') in allowed_tool_names
+            ]
+            
+            log.info(f"应用personality {personality_id} 的工具限制，允许的工具: {allowed_tool_names}, 过滤后数量: {len(filtered_tools)}/{len(all_tools_schema)}")
+            
+            return filtered_tools
+            
+        except Exception as e:
+            log.error(f"获取允许的工具schema失败: {e}")
+            # 出错时返回空列表，避免暴露所有工具
+            return []
 
 
 # 创建全局聊天引擎实例

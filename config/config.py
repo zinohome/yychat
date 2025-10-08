@@ -112,6 +112,18 @@ class Config:
     PERFORMANCE_MAX_HISTORY = int(os.getenv("PERFORMANCE_MAX_HISTORY", "1000"))
     PERFORMANCE_SAMPLING_RATE = float(os.getenv("PERFORMANCE_SAMPLING_RATE", "1.0"))  # 1.0 = 100%采样
     
+    # Redis缓存配置
+    USE_REDIS_CACHE = os.getenv("USE_REDIS_CACHE", "false").lower() == "true"
+    REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+    REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+    REDIS_DB = int(os.getenv("REDIS_DB", "0"))
+    REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", None)
+    REDIS_TTL = int(os.getenv("REDIS_TTL", "1800"))  # 默认30分钟
+    
+    # 内存缓存配置（作为Redis的降级方案）
+    MEMORY_CACHE_MAXSIZE = int(os.getenv("MEMORY_CACHE_MAXSIZE", "1000"))
+    MEMORY_CACHE_TTL = int(os.getenv("MEMORY_CACHE_TTL", "1800"))  # 默认30分钟
+    
 # 创建配置实例
 def get_config():
     return Config()
