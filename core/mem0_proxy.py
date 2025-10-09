@@ -507,8 +507,9 @@ class FallbackHandler:
         except Exception as e:
             log.error(f"OpenAI降级处理失败: {e}")
             if stream:
+                error_text = str(e)
                 async def error_generator():
-                    yield {"role": "assistant", "content": f"发生错误: {str(e)}", "finish_reason": "error", "stream": True}
+                    yield {"role": "assistant", "content": f"发生错误: {error_text}", "finish_reason": "error", "stream": True}
                 return error_generator()
             else:
                 return {"role": "assistant", "content": f"发生错误: {str(e)}"}
