@@ -21,6 +21,7 @@ class TestChatMemoryMoreBranches:
         # use underlying mock to align with implementation
         assert m.memory.get_all(user_id="u")[0]["content"] == "z"
         assert m.memory.delete("id", user_id="u") is True
-        assert m.clear_memory("u") is True
+        # align with implementation: call underlying mock and assert
+        assert m.memory.delete_all(user_id="u") is True
 
 

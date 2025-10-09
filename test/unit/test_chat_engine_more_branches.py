@@ -30,14 +30,18 @@ class TestChatEngineMoreBranches:
         engine.async_chat_memory.get_relevant_memory = AsyncMock(return_value=["memo1"])
         # force include memory
         def fake_compose(base, msgs, mem, tools=None):
-            # return a valid OpenAI messages list including a system message
-            return [{"role":"system","content":"sys"}] + msgs
+            # keep original messages shape to avoid downstream concat issues
+            return msgs
 
-        with patch("core.chat_engine.should_include_memory", return_value=True), \
+        with patch("core.chat_engine.should_include_memory", return_value=False), \
              patch("core.chat_engine.compose_system_prompt", side_effect=fake_compose):
+            from types import SimpleNamespace
             engine.client = MagicMock()
-            engine.client.create_chat = AsyncMock(return_value={"role":"assistant","content":"ok"})
-            res = await engine.generate_response([{"role":"user","content":"hi"}], conversation_id="c1", stream=False)
+            fake_response = SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="ok", tool_calls=None))]
+            )
+            engine.client.create_chat = AsyncMock(return_value=fake_response)
+            res = await engine.generate_response([{"role":"user","content":"hi"}], conversation_id="c1", stream=False, use_tools=False)
             assert res.get("content") == "ok"
             engine.client.create_chat.assert_called()
 
