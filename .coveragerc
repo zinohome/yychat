@@ -1,0 +1,23 @@
+[run]
+branch = True
+source = .
+
+[report]
+omit = 
+	    utils/check_mem0_config.py
+	    utils/config_validator.py
+	    start.sh
+	    start_with_venv.sh
+	    docker/*
+	    docker/**
+	    temp/*
+	    app.py
+	    test/*
+	    schemas/*
+	    services/mcp/*
+	    services/mcp/**
+	    utils/cache.py
+exclude_lines = 
+	pragma: no cover
+	if __name__ == .__main__.:
+

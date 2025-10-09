@@ -629,7 +629,46 @@ class Mem0ChatEngine(BaseEngine):
         # 缓存已初始化的客户端
         self.clients_cache = {}
 
+        # 确保collection存在
+        try:
+            self._ensure_collection_exists()
+        except Exception as e:
+            log.warning(f"Collection检查失败，将在首次使用时创建: {e}")
+
         log.info("Mem0ChatEngine初始化完成")
+
+    def _ensure_collection_exists(self):
+        """确保Mem0 collection存在"""
+        try:
+            client = self.mem0_client.get_client()
+            if not client:
+                log.warning("Mem0客户端未初始化，跳过collection检查")
+                return
+            
+            # 使用一个测试查询来检查collection是否存在
+            # 使用一个不常见的用户ID避免影响真实数据
+            test_user_id = "__collection_test__"
+            try:
+                # 尝试搜索，如果collection不存在会抛出异常
+                test_result = client.search("test", user_id=test_user_id)
+                log.debug("Collection已存在，测试搜索成功")
+            except Exception as e:
+                if "does not exists" in str(e) or "not found" in str(e) or "Collection" in str(e):
+                    log.info("Collection不存在，正在创建...")
+                    # 创建一个测试记忆来初始化collection
+                    client.add("test", user_id=test_user_id)
+                    # 立即删除测试记忆，保持数据库干净
+                    try:
+                        client.delete("test", user_id=test_user_id)
+                    except Exception as delete_err:
+                        log.warning(f"删除测试记忆失败: {delete_err}")
+                    log.info("Collection创建成功")
+                else:
+                    # 其他类型的错误，重新抛出
+                    raise e
+        except Exception as e:
+            log.error(f"Collection检查/创建失败: {e}")
+            raise e
 
     def get_client(self, user_id: str = "default"):
         """获取或创建特定用户的Mem0客户端"""
@@ -852,11 +891,26 @@ class Mem0ChatEngine(BaseEngine):
         
         # 检查Mem0客户端
         mem0_healthy = True
+        collection_healthy = True
         try:
             mem0_client = self.mem0_client.get_client()
             if not mem0_client:
                 mem0_healthy = False
                 errors.append("Mem0客户端未初始化")
+            else:
+                # 检查collection状态
+                try:
+                    # 使用测试用户ID检查collection
+                    test_user_id = "__health_check__"
+                    mem0_client.search("health_check", user_id=test_user_id)
+                    log.debug("Collection健康检查通过")
+                except Exception as e:
+                    if "does not exists" in str(e) or "not found" in str(e) or "Collection" in str(e):
+                        collection_healthy = False
+                        errors.append(f"Collection不存在: {str(e)}")
+                    else:
+                        # 其他错误，可能是正常的（比如没有找到结果）
+                        log.debug(f"Collection搜索测试完成: {str(e)}")
         except Exception as e:
             mem0_healthy = False
             errors.append(f"Mem0客户端检查失败: {str(e)}")
@@ -893,13 +947,14 @@ class Mem0ChatEngine(BaseEngine):
             errors.append(f"人格系统检查失败: {str(e)}")
         
         # 综合判断（至少有一个客户端健康即可）
-        all_healthy = (mem0_healthy or openai_healthy) and tool_healthy and personality_healthy
+        all_healthy = (mem0_healthy or openai_healthy) and tool_healthy and personality_healthy and collection_healthy
         
         return {
             "healthy": all_healthy,
             "timestamp": timestamp,
             "details": {
                 "mem0_client": mem0_healthy,
+                "mem0_collection": collection_healthy,
                 "openai_client": openai_healthy,
                 "tool_system": tool_healthy,
                 "personality_system": personality_healthy
