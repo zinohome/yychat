@@ -32,23 +32,48 @@ class ChatMemory:
         """根据配置初始化Memory实例（本地或API模式）"""
         try:
             if self.is_local:
-                # 本地模式：使用 Memory + ChromaDB
+                # 本地模式：使用 Memory + 可选向量库（chroma 或 qdrant）
                 from mem0 import Memory
                 from mem0.configs.base import MemoryConfig
                 
-                memory_config = MemoryConfig(
-                    llm={
-                        "provider": self.config.MEM0_LLM_PROVIDER,
+                # 选择向量库
+                provider = getattr(self.config, 'VECTOR_STORE_PROVIDER', 'chroma').lower()
+                if provider == 'qdrant':
+                    vector_store = {
+                        "provider": "qdrant",
                         "config": {
-                            "model": self.config.MEM0_LLM_CONFIG_MODEL, 
-                            "max_tokens": self.config.MEM0_LLM_CONFIG_MAX_TOKENS
+                            "collection_name": getattr(self.config, 'QDRANT_COLLECTION_NAME', self.config.CHROMA_COLLECTION_NAME),
+                            "host": getattr(self.config, 'QDRANT_HOST', '127.0.0.1'),
+                            "port": int(getattr(self.config, 'QDRANT_PORT', 6333)),
+                            **({"api_key": self.config.QDRANT_API_KEY} if getattr(self.config, 'QDRANT_API_KEY', None) else {})
                         }
-                    },
-                    vector_store={
+                    }
+                else:
+                    vector_store = {
                         "provider": "chroma",
                         "config": {
                             "collection_name": self.config.CHROMA_COLLECTION_NAME,
                             "path": self.config.CHROMA_PERSIST_DIRECTORY
+                        }
+                    }
+
+                memory_config = MemoryConfig(
+                    llm={
+                        "provider": self.config.MEM0_LLM_PROVIDER,
+                        "config": {
+                            "api_key": self.config.OPENAI_API_KEY,
+                            "openai_base_url": self.config.OPENAI_BASE_URL,
+                            "model": self.config.MEM0_LLM_CONFIG_MODEL,
+                            "max_tokens": self.config.MEM0_LLM_CONFIG_MAX_TOKENS
+                        }
+                    },
+                    vector_store=vector_store,
+                    embedder={
+                        "provider": "openai",
+                        "config": {
+                            "model": getattr(self.config, 'MEM0_EMBEDDER_MODEL', 'text-embedding-3-small'),
+                            "api_key": self.config.OPENAI_API_KEY,
+                            "openai_base_url": self.config.OPENAI_BASE_URL
                         }
                     }
                 )
@@ -58,7 +83,8 @@ class ChatMemory:
                 log.info(f"成功创建本地Memory实例")
                 
                 # 确保持久化目录存在
-                os.makedirs(self.config.CHROMA_PERSIST_DIRECTORY, exist_ok=True)
+                if provider == 'chroma':
+                    os.makedirs(self.config.CHROMA_PERSIST_DIRECTORY, exist_ok=True)
             else:
                 # API模式：使用 MemoryClient
                 from mem0 import MemoryClient
@@ -319,6 +345,27 @@ class AsyncChatMemory:
                 from mem0 import AsyncMemory
                 from mem0.configs.base import MemoryConfig
                 
+                # 选择向量库
+                provider = getattr(self.config, 'VECTOR_STORE_PROVIDER', 'chroma').lower()
+                if provider == 'qdrant':
+                    vector_store = {
+                        "provider": "qdrant",
+                        "config": {
+                            "collection_name": getattr(self.config, 'QDRANT_COLLECTION_NAME', self.config.CHROMA_COLLECTION_NAME),
+                            "host": getattr(self.config, 'QDRANT_HOST', '127.0.0.1'),
+                            "port": int(getattr(self.config, 'QDRANT_PORT', 6333)),
+                            **({"api_key": self.config.QDRANT_API_KEY} if getattr(self.config, 'QDRANT_API_KEY', None) else {})
+                        }
+                    }
+                else:
+                    vector_store = {
+                        "provider": "chroma",
+                        "config": {
+                            "collection_name": self.config.CHROMA_COLLECTION_NAME,
+                            "path": self.config.CHROMA_PERSIST_DIRECTORY
+                        }
+                    }
+
                 memory_config = MemoryConfig(
                     llm={
                         "provider": self.config.MEM0_LLM_PROVIDER,
@@ -327,18 +374,21 @@ class AsyncChatMemory:
                             "max_tokens": self.config.MEM0_LLM_CONFIG_MAX_TOKENS
                         }
                     },
-                    vector_store={
-                        "provider": "chroma",
+                    vector_store=vector_store,
+                    embedder={
+                        "provider": "openai",
                         "config": {
-                            "collection_name": self.config.CHROMA_COLLECTION_NAME,
-                            "path": self.config.CHROMA_PERSIST_DIRECTORY
+                            "model": getattr(self.config, 'MEM0_EMBEDDER_MODEL', 'text-embedding-3-small'),
+                            "api_key": self.config.OPENAI_API_KEY,
+                            "openai_base_url": self.config.OPENAI_BASE_URL
                         }
                     }
                 )
                 
                 log.info(f"使用本地模式初始化AsyncMemory")
                 self.memory = AsyncMemory(config=memory_config)
-                os.makedirs(self.config.CHROMA_PERSIST_DIRECTORY, exist_ok=True)
+                if provider == 'chroma':
+                    os.makedirs(self.config.CHROMA_PERSIST_DIRECTORY, exist_ok=True)
             else:
                 from mem0 import AsyncMemoryClient
                 
