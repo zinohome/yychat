@@ -1015,7 +1015,7 @@ class Mem0ChatEngine(BaseEngine):
             return {
                 "success": True,
                 "conversation_id": conversation_id,
-                "memories": memories,
+                "memories": memories,  # 这里已经是提取出的记忆内容列表
                 "total_count": total_count,
                 "returned_count": len(memories)
             }

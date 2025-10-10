@@ -214,12 +214,41 @@ class ChatMemory:
             memories = self.memory.get_all(user_id=conversation_id)
             
             # 检查memories的格式并相应处理
-            if isinstance(memories, list):
+            if isinstance(memories, dict) and "results" in memories:
+                # 如果memories是字典且包含results键，处理results列表
+                results = memories["results"]
+                if isinstance(results, list):
+                    result = []
+                    for mem in results:
+                        # 如果mem是字典，优先获取memory字段，其次content字段
+                        if isinstance(mem, dict):
+                            if "memory" in mem:
+                                result.append(mem["memory"])
+                            elif "content" in mem:
+                                result.append(mem["content"])
+                            else:
+                                result.append(str(mem))
+                        # 如果mem是字符串，直接添加
+                        elif isinstance(mem, str):
+                            result.append(mem)
+                        # 其他类型转换为字符串
+                        else:
+                            result.append(str(mem))
+                    return result
+                else:
+                    return [str(results)]
+            elif isinstance(memories, list):
+                # 如果memories直接是列表
                 result = []
                 for mem in memories:
-                    # 如果mem是字典并且有content键，获取content值
-                    if isinstance(mem, dict) and "content" in mem:
-                        result.append(mem["content"])
+                    # 如果mem是字典，优先获取memory字段，其次content字段
+                    if isinstance(mem, dict):
+                        if "memory" in mem:
+                            result.append(mem["memory"])
+                        elif "content" in mem:
+                            result.append(mem["content"])
+                        else:
+                            result.append(str(mem))
                     # 如果mem是字符串，直接添加
                     elif isinstance(mem, str):
                         result.append(mem)
@@ -227,7 +256,7 @@ class ChatMemory:
                     else:
                         result.append(str(mem))
                 return result
-            # 如果memories不是列表，转换为列表返回
+            # 如果memories不是列表也不是字典，转换为列表返回
             elif memories is not None:
                 return [str(memories)]
             else:
@@ -468,12 +497,41 @@ class AsyncChatMemory:
             memories = await self.memory.get_all(user_id=conversation_id)
             
             # 检查memories的格式并相应处理
-            if isinstance(memories, list):
+            if isinstance(memories, dict) and "results" in memories:
+                # 如果memories是字典且包含results键，处理results列表
+                results = memories["results"]
+                if isinstance(results, list):
+                    result = []
+                    for mem in results:
+                        # 如果mem是字典，优先获取memory字段，其次content字段
+                        if isinstance(mem, dict):
+                            if "memory" in mem:
+                                result.append(mem["memory"])
+                            elif "content" in mem:
+                                result.append(mem["content"])
+                            else:
+                                result.append(str(mem))
+                        # 如果mem是字符串，直接添加
+                        elif isinstance(mem, str):
+                            result.append(mem)
+                        # 其他类型转换为字符串
+                        else:
+                            result.append(str(mem))
+                    return result
+                else:
+                    return [str(results)]
+            elif isinstance(memories, list):
+                # 如果memories直接是列表
                 result = []
                 for mem in memories:
-                    # 如果mem是字典并且有content键，获取content值
-                    if isinstance(mem, dict) and "content" in mem:
-                        result.append(mem["content"])
+                    # 如果mem是字典，优先获取memory字段，其次content字段
+                    if isinstance(mem, dict):
+                        if "memory" in mem:
+                            result.append(mem["memory"])
+                        elif "content" in mem:
+                            result.append(mem["content"])
+                        else:
+                            result.append(str(mem))
                     # 如果mem是字符串，直接添加
                     elif isinstance(mem, str):
                         result.append(mem)
