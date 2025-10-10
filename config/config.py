@@ -57,6 +57,14 @@ class Config:
     CHROMA_PERSIST_DIRECTORY = os.getenv("CHROMA_PERSIST_DIRECTORY", "./chroma_db")
     CHROMA_COLLECTION_NAME = os.getenv("CHROMA_COLLECTION_NAME", "chat_history")
     
+    # 向量库提供者配置
+    VECTOR_STORE_PROVIDER = os.getenv("VECTOR_STORE_PROVIDER", "chroma")  # 可选: chroma, qdrant
+    # Qdrant配置
+    QDRANT_HOST = os.getenv("QDRANT_HOST", "192.168.66.163")
+    QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
+    QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+    QDRANT_COLLECTION_NAME = os.getenv("QDRANT_COLLECTION_NAME", CHROMA_COLLECTION_NAME)
+    
     # 日志配置
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
     LOG_FILE_NAME = os.getenv("LOG_FILE_NAME", "app.log")

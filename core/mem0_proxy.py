@@ -38,14 +38,28 @@ class Mem0Client:
                 # 本地配置
                 # 使用 Mem0 OSS 配置
                 # 根据 Mem0 官方文档规范化的配置
-                mem_config = {
-                    "vector_store": {
+                # 根据配置选择向量库提供者
+                if getattr(self.config, 'VECTOR_STORE_PROVIDER', 'chroma').lower() == 'qdrant':
+                    vector_store = {
+                        "provider": "qdrant",
+                        "config": {
+                            "collection_name": getattr(self.config, 'QDRANT_COLLECTION_NAME', self.config.CHROMA_COLLECTION_NAME),
+                            "host": getattr(self.config, 'QDRANT_HOST', '127.0.0.1'),
+                            "port": int(getattr(self.config, 'QDRANT_PORT', 6333)),
+                            **({"api_key": self.config.QDRANT_API_KEY} if getattr(self.config, 'QDRANT_API_KEY', None) else {})
+                        }
+                    }
+                else:
+                    vector_store = {
                         "provider": "chroma",
                         "config": {
                             "collection_name": self.config.CHROMA_COLLECTION_NAME,
                             "path": self.config.CHROMA_PERSIST_DIRECTORY
                         }
-                    },
+                    }
+
+                mem_config = {
+                    "vector_store": vector_store,
                     "llm": {
                         "provider": self.config.MEM0_LLM_PROVIDER,
                         "config": {
