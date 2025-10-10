@@ -50,6 +50,9 @@ class Config:
     MEM0_LLM_CONFIG_MODEL = os.getenv("MEM0_LLM_CONFIG_MODEL", "gpt-4.1")
     MEM0_LLM_CONFIG_MAX_TOKENS = int(os.getenv("MEM0_LLM_CONFIG_MAX_TOKENS", "32768"))
     
+    # Embedder配置
+    MEM0_EMBEDDER_MODEL = os.getenv("MEM0_EMBEDDER_MODEL", "text-embedding-3-small")
+    
     # ChromaDB配置
     CHROMA_PERSIST_DIRECTORY = os.getenv("CHROMA_PERSIST_DIRECTORY", "./chroma_db")
     CHROMA_COLLECTION_NAME = os.getenv("CHROMA_COLLECTION_NAME", "chat_history")

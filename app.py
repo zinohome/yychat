@@ -378,7 +378,7 @@ async def call_mcp_service(request: MCPServiceCallRequest, api_key: str = Depend
                 raise HTTPException(status_code=400, detail={"error": {"message": "Missing tool_name or both service_name and method_name", "type": "validation_error"}})
         
         # 调用MCP服务，传递所有必要参数
-        result = await chat_engine.call_mcp_service(
+        result = chat_engine.call_mcp_service(
             tool_name=tool_name,
             params=params,
             service_name=request.service_name,

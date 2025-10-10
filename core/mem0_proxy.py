@@ -2,6 +2,8 @@ import time
 import json
 import asyncio
 from typing import List, Dict, Any, Optional, Union, AsyncGenerator
+
+from mem0 import Memory
 from openai import OpenAI
 from mem0.proxy.main import Mem0
 from config.config import get_config
@@ -34,6 +36,8 @@ class Mem0Client:
         try:
             if self.is_local:
                 # 本地配置
+                # 使用 Mem0 OSS 配置
+                # 根据 Mem0 官方文档规范化的配置
                 mem_config = {
                     "vector_store": {
                         "provider": "chroma",
@@ -45,13 +49,25 @@ class Mem0Client:
                     "llm": {
                         "provider": self.config.MEM0_LLM_PROVIDER,
                         "config": {
+                            "api_key": self.config.OPENAI_API_KEY,
+                            "openai_base_url": self.config.OPENAI_BASE_URL,
                             "model": self.config.MEM0_LLM_CONFIG_MODEL,
                             "max_tokens": self.config.MEM0_LLM_CONFIG_MAX_TOKENS
                         }
+                    },
+                    "embedder": {
+                        "provider": "openai",
+                        "config": {
+                            "model": self.config.MEM0_EMBEDDER_MODEL,  # 从配置文件读取嵌入模型
+                            "api_key": self.config.OPENAI_API_KEY,
+                            "openai_base_url": self.config.OPENAI_BASE_URL  # 自定义 OpenAI 服务器地址
+                        }
                     }
                 }
+                
+                log.info(f"正在创建Mem0客户端，配置: {mem_config}")
                 self.client = Mem0(config=mem_config)
-                log.info("使用本地配置初始化Mem0客户端")
+                log.info("使用本地配置初始化Mem0客户端成功")
 
                 # 兼容本地 Memory.add 不支持 filters 参数的问题：移除 filters 以避免异常
                 try:
@@ -69,7 +85,7 @@ class Mem0Client:
                     log.warning(f"为本地 Mem0 添加 filters 兼容补丁失败: {patch_err}")
             else:
                 # API密钥配置
-                self.client = Mem0(api_key=self.config.MEM0_API_KEY)
+                self.client = Memory(api_key=self.config.MEM0_API_KEY)
                 log.info("使用Mem0 API密钥初始化客户端")
         except Exception as e:
             log.error(f"初始化Mem0客户端失败: {e}")
@@ -125,13 +141,43 @@ class PersonalityHandler:
 class MemoryHandler:
     """记忆处理器"""
 
-    def __init__(self, config):
+    def __init__(self, config, mem0_client=None):
         self.config = config
         self.save_mode = config.MEMORY_SAVE_MODE
         self.retrieval_limit = config.MEMORY_RETRIEVAL_LIMIT
         self.retrieval_timeout = config.MEMORY_RETRIEVAL_TIMEOUT
-        self.chat_memory = ChatMemory()
-        self.async_chat_memory = get_async_chat_memory()
+        self.mem0_client = mem0_client
+        # 延迟初始化，避免重复创建Memory实例
+        self._chat_memory = None
+        self._async_chat_memory = None
+
+    @property
+    def chat_memory(self):
+        """延迟初始化ChatMemory，优先使用共享的Mem0客户端"""
+        if self._chat_memory is None:
+            if self.mem0_client and self.mem0_client.get_client():
+                # 使用共享的Mem0客户端，避免重复创建
+                log.debug("MemoryHandler: 使用共享的Mem0客户端创建ChatMemory")
+                # 从Mem0客户端获取底层的Memory实例
+                shared_memory = self.mem0_client.get_client().mem0_client
+                self._chat_memory = ChatMemory(memory=shared_memory)
+            else:
+                self._chat_memory = ChatMemory()
+        return self._chat_memory
+
+    @property
+    def async_chat_memory(self):
+        """延迟初始化AsyncChatMemory，优先使用共享的Mem0客户端"""
+        if self._async_chat_memory is None:
+            if self.mem0_client and self.mem0_client.get_client():
+                # 使用共享的Mem0客户端，避免重复创建
+                log.debug("MemoryHandler: 使用共享的Mem0客户端创建AsyncMemory")
+                # 从Mem0客户端获取底层的Memory实例
+                shared_memory = self.mem0_client.get_client().mem0_client
+                self._async_chat_memory = get_async_chat_memory(memory=shared_memory)
+            else:
+                self._async_chat_memory = get_async_chat_memory()
+        return self._async_chat_memory
 
     async def save_memory(self, messages: List[Dict[str, str]], response: Dict[str, Any], conversation_id: str):
         """根据配置的保存模式保存记忆"""
@@ -261,11 +307,28 @@ class ToolHandler:
             new_messages.extend(tool_response_messages)
 
             # 重新生成响应（递归调用，但不使用工具）
-            from core.mem0_proxy import get_mem0_proxy
-            mem0_proxy = get_mem0_proxy()
-            response = await mem0_proxy.generate_response(
-                new_messages, conversation_id, personality_id=personality_id, use_tools=False, stream=False
+            # 使用OpenAI客户端直接生成响应，避免循环导入
+            from openai import OpenAI
+            openai_client = OpenAI(
+                api_key=self.config.OPENAI_API_KEY,
+                base_url=self.config.OPENAI_BASE_URL
             )
+            
+            response = await asyncio.to_thread(
+                openai_client.chat.completions.create,
+                messages=new_messages,
+                model=self.config.OPENAI_MODEL,
+                temperature=self.config.OPENAI_TEMPERATURE
+            )
+            
+            if hasattr(response, 'choices') and response.choices:
+                message = response.choices[0].message
+                response = {
+                    "role": "assistant",
+                    "content": message.content or ""
+                }
+            else:
+                response = {"role": "assistant", "content": "无法生成响应"}
 
             return response
         except Exception as e:
@@ -339,11 +402,14 @@ class ResponseHandler:
 
     async def handle_streaming_response(self, client, call_params: Dict, conversation_id: str, original_messages: List[Dict]) -> AsyncGenerator[Dict[str, Any], None]:
         """处理流式响应，支持工具调用和记忆"""
+        log.info(f"[STREAMING] 开始处理mem0流式响应，conversation_id={conversation_id}")
         try:
             # 调用Mem0流式API（在线程中发起）
+            log.info(f"[STREAMING] 调用Mem0 API，call_params={call_params}")
             response = await asyncio.to_thread(
                 client.chat.completions.create, **call_params
             )
+            log.info(f"[STREAMING] Mem0 API调用成功，response类型={type(response)}")
 
             # 处理流式响应
             tool_calls = None
@@ -431,6 +497,8 @@ class ResponseHandler:
                 "finish_reason": "error",
                 "stream": True
             }
+            # 重新抛出异常，让包装器知道流式响应出现了问题
+            raise e
 
     async def handle_non_streaming_response(self, client, call_params: Dict, conversation_id: str, original_messages: List[Dict]) -> Dict[str, Any]:
         """处理非流式响应，支持工具调用和记忆"""
@@ -526,8 +594,8 @@ class FallbackHandler:
                 metrics.total_time = time.time() - total_start_time
                 
                 # 记录性能指标
-                if config.ENABLE_PERFORMANCE_MONITOR:
-                    performance_monitor.record(metrics, log_enabled=config.PERFORMANCE_LOG_ENABLED)
+                if self.config.ENABLE_PERFORMANCE_MONITOR:
+                    performance_monitor.record(metrics, log_enabled=self.config.PERFORMANCE_LOG_ENABLED)
                 
                 return result
         except Exception as e:
@@ -643,10 +711,11 @@ class FallbackHandler:
         total_start_time: float
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """包装降级流式响应生成器，确保性能指标被记录"""
+        log.info(f"[FALLBACK PERF WRAPPER] 开始包装降级流式响应，request_id={metrics.request_id}")
+        first_chunk_time = None
+        chunk_count = 0
+        
         try:
-            first_chunk_time = None
-            chunk_count = 0
-            
             async for chunk in streaming_generator:
                 chunk_count += 1
                 if chunk_count == 1:
@@ -654,25 +723,23 @@ class FallbackHandler:
                     log.debug(f"降级流式响应首字节时间: {first_chunk_time - total_start_time:.2f}秒")
                 
                 yield chunk
-            
-            # 流式响应完成，记录性能指标
+                
+        except Exception as e:
+            log.error(f"降级流式响应包装器出错: {e}")
+            # 重新抛出异常
+            raise e
+        finally:
+            # 无论是否发生异常，都记录性能指标
+            log.info(f"[FALLBACK PERF WRAPPER] 流式响应完成（finally块），chunk_count={chunk_count}")
             metrics.total_time = time.time() - total_start_time
             if first_chunk_time:
                 metrics.first_chunk_time = first_chunk_time - total_start_time
             
-            if config.ENABLE_PERFORMANCE_MONITOR:
-                log.debug(f"[PERF] 记录降级流式响应性能指标: total_time={metrics.total_time:.3f}s, chunks={chunk_count}, stream=True")
-                performance_monitor.record(metrics, log_enabled=config.PERFORMANCE_LOG_ENABLED)
-                
-        except Exception as e:
-            log.error(f"降级流式响应包装器出错: {e}")
-            # 记录错误情况下的性能指标
-            metrics.total_time = time.time() - total_start_time
-            if config.ENABLE_PERFORMANCE_MONITOR:
-                performance_monitor.record(metrics, log_enabled=config.PERFORMANCE_LOG_ENABLED)
-            
-            # 重新抛出异常
-            raise e
+            log.info(f"[FALLBACK PERF WRAPPER] 准备记录性能指标: ENABLE={self.config.ENABLE_PERFORMANCE_MONITOR}, total_time={metrics.total_time:.3f}s")
+            if self.config.ENABLE_PERFORMANCE_MONITOR:
+                log.info(f"[PERF] 记录降级流式响应性能指标: total_time={metrics.total_time:.3f}s, chunks={chunk_count}, stream=True")
+                performance_monitor.record(metrics, log_enabled=self.config.PERFORMANCE_LOG_ENABLED)
+                log.info(f"[PERF] 降级流式响应性能指标已记录")
 
 
 class Mem0ChatEngine(BaseEngine):
@@ -687,7 +754,8 @@ class Mem0ChatEngine(BaseEngine):
         self.openai_client = OpenAIClient(self.config)
         self.tool_handler = ToolHandler(self.config)
         self.personality_handler = PersonalityHandler(self.config)
-        self.memory_handler = MemoryHandler(self.config)
+        # 将mem0_client传递给MemoryHandler，避免重复创建Memory实例
+        self.memory_handler = MemoryHandler(self.config, self.mem0_client)
         self.response_handler = ResponseHandler(self.config)
         self.fallback_handler = FallbackHandler(self.config)
 
@@ -715,25 +783,32 @@ class Mem0ChatEngine(BaseEngine):
             test_user_id = "__collection_test__"
             try:
                 # 尝试搜索，如果collection不存在会抛出异常
-                test_result = client.search("test", user_id=test_user_id)
+                # 使用 mem0_client 的 search 方法
+                test_result = client.mem0_client.search("test", user_id=test_user_id)
                 log.debug("Collection已存在，测试搜索成功")
             except Exception as e:
                 if "does not exists" in str(e) or "not found" in str(e) or "Collection" in str(e):
                     log.info("Collection不存在，正在创建...")
                     # 创建一个测试记忆来初始化collection
-                    client.add("test", user_id=test_user_id)
+                    client.mem0_client.add("test", user_id=test_user_id)
                     # 立即删除测试记忆，保持数据库干净
                     try:
-                        client.delete("test", user_id=test_user_id)
+                        client.mem0_client.delete("test", user_id=test_user_id)
                     except Exception as delete_err:
                         log.warning(f"删除测试记忆失败: {delete_err}")
                     log.info("Collection创建成功")
                 else:
-                    # 其他类型的错误，重新抛出
-                    raise e
+                    # 其他类型的错误，直接创建collection
+                    log.info("Collection检查失败，直接创建collection...")
+                    try:
+                        client.mem0_client.add("test", user_id=test_user_id)
+                        client.mem0_client.delete("test", user_id=test_user_id)
+                        log.info("Collection创建成功")
+                    except Exception as create_err:
+                        log.warning(f"Collection创建失败: {create_err}")
         except Exception as e:
-            log.error(f"Collection检查/创建失败: {e}")
-            raise e
+            log.warning(f"Collection检查/创建失败: {e}")
+            # 不抛出异常，让系统继续运行
 
     def get_client(self, user_id: str = "default"):
         """获取或创建特定用户的Mem0客户端"""
@@ -801,7 +876,9 @@ class Mem0ChatEngine(BaseEngine):
 
             # 4. 获取客户端
             client = self.get_client()
+            log.info(f"[MEM0] 获取客户端结果: {client is not None}")
             if not client:
+                log.error("[MEM0] Mem0客户端未初始化，将降级到OpenAI")
                 raise Exception("Mem0客户端未初始化")
 
             # 5. 尝试使用Mem0
@@ -823,8 +900,8 @@ class Mem0ChatEngine(BaseEngine):
                 metrics.total_time = time.time() - total_start_time
                 
                 # 记录性能指标
-                if config.ENABLE_PERFORMANCE_MONITOR:
-                    performance_monitor.record(metrics, log_enabled=config.PERFORMANCE_LOG_ENABLED)
+                if self.config.ENABLE_PERFORMANCE_MONITOR:
+                    performance_monitor.record(metrics, log_enabled=self.config.PERFORMANCE_LOG_ENABLED)
                 
                 return result
 
@@ -835,7 +912,7 @@ class Mem0ChatEngine(BaseEngine):
                 processed_messages, conversation_id, personality_id, use_tools, stream
             )
         finally:
-            log.debug(f"Mem0代理响应生成耗时: {time.time() - start_time:.3f}秒")
+            log.debug(f"Mem0代理响应生成耗时: {time.time() - total_start_time:.3f}秒")
 
     async def _wrap_streaming_response_with_performance(
         self, 
@@ -844,6 +921,7 @@ class Mem0ChatEngine(BaseEngine):
         total_start_time: float
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """包装流式响应生成器，确保性能指标被记录"""
+        log.info(f"[PERF WRAPPER] 开始包装mem0流式响应，request_id={metrics.request_id}")
         try:
             first_chunk_time = None
             chunk_count = 0
@@ -857,21 +935,24 @@ class Mem0ChatEngine(BaseEngine):
                 yield chunk
             
             # 流式响应完成，记录性能指标
+            log.info(f"[PERF WRAPPER] 流式响应完成，chunk_count={chunk_count}")
             metrics.total_time = time.time() - total_start_time
             if first_chunk_time:
                 metrics.first_chunk_time = first_chunk_time - total_start_time
             metrics.openai_api_time = metrics.total_time  # 流式响应中，总时间就是API时间
             
-            if config.ENABLE_PERFORMANCE_MONITOR:
-                log.debug(f"[PERF] 记录流式响应性能指标: total_time={metrics.total_time:.3f}s, chunks={chunk_count}, stream=True")
-                performance_monitor.record(metrics, log_enabled=config.PERFORMANCE_LOG_ENABLED)
+            log.info(f"[PERF WRAPPER] 准备记录性能指标: ENABLE={self.config.ENABLE_PERFORMANCE_MONITOR}, total_time={metrics.total_time:.3f}s")
+            if self.config.ENABLE_PERFORMANCE_MONITOR:
+                log.info(f"[PERF] 记录流式响应性能指标: total_time={metrics.total_time:.3f}s, chunks={chunk_count}, stream=True")
+                performance_monitor.record(metrics, log_enabled=self.config.PERFORMANCE_LOG_ENABLED)
+                log.info(f"[PERF] 性能指标已记录")
                 
         except Exception as e:
             log.error(f"流式响应包装器出错: {e}")
             # 记录错误情况下的性能指标
             metrics.total_time = time.time() - total_start_time
-            if config.ENABLE_PERFORMANCE_MONITOR:
-                performance_monitor.record(metrics, log_enabled=config.PERFORMANCE_LOG_ENABLED)
+            if self.config.ENABLE_PERFORMANCE_MONITOR:
+                performance_monitor.record(metrics, log_enabled=self.config.PERFORMANCE_LOG_ENABLED)
             
             # 重新抛出异常
             raise e
@@ -1031,7 +1112,7 @@ class Mem0ChatEngine(BaseEngine):
                 try:
                     # 使用测试用户ID检查collection
                     test_user_id = "__health_check__"
-                    mem0_client.search("health_check", user_id=test_user_id)
+                    mem0_client.mem0_client.search("health_check", user_id=test_user_id)
                     log.debug("Collection健康检查通过")
                 except Exception as e:
                     if "does not exists" in str(e) or "not found" in str(e) or "Collection" in str(e):

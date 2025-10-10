@@ -269,14 +269,19 @@ class ChatMemory:
 class AsyncChatMemory:
     """异步Memory管理类 (优化版本)"""
     
-    def __init__(self):
+    def __init__(self, memory=None):
         self.config = get_config()
         self.is_local = self.config.MEMO_USE_LOCAL
         
         # 添加缓存
         self._memory_cache = TTLCache(maxsize=100, ttl=300)
         
-        self._init_memory()
+        # 如果没有提供memory对象，创建一个新的
+        if memory is None:
+            self._init_memory()
+        else:
+            # 使用提供的memory对象
+            self.memory = memory
     
     def _init_memory(self):
         """根据配置初始化AsyncMemory实例（本地或API模式）"""
@@ -499,10 +504,10 @@ class AsyncChatMemory:
 # 全局实例
 _async_chat_memory = None
 
-def get_async_chat_memory():
+def get_async_chat_memory(memory=None):
     """获取全局AsyncChatMemory实例"""
     global _async_chat_memory
     if _async_chat_memory is None:
-        _async_chat_memory = AsyncChatMemory()
+        _async_chat_memory = AsyncChatMemory(memory)
     return _async_chat_memory
 

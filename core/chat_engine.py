@@ -586,7 +586,7 @@ class ChatEngine(BaseEngine):
         # 重新生成响应 - 明确设置stream=False，传递personality_id避免重复应用
         return await self.generate_response(new_messages, conversation_id, personality_id=personality_id, use_tools=False, stream=False)
     
-    async def call_mcp_service(self, tool_name: str = None, params: dict = None, 
+    def call_mcp_service(self, tool_name: str = None, params: dict = None, 
                          service_name: str = None, method_name: str = None, 
                          mcp_server: str = None):
         """调用MCP服务"""
