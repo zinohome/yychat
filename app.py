@@ -484,9 +484,9 @@ async def get_performance_stats(api_key: str = Depends(verify_api_key)):
         log.error(f"Failed to get performance stats: {e}")
         raise HTTPException(status_code=500, detail={"error": {"message": str(e), "type": "server_error"}})
 
-# Dashboard专用API（无需认证，仅用于Dashboard）
-@app.get("/api/dashboard/stats", tags=["Dashboard"])
-async def get_dashboard_stats():
+# Dashboard专用API（无需认证，仅用于Dashboard）—统一到/v1并隐藏旧/api
+@app.get("/v1/dashboard/stats", tags=["Dashboard"], include_in_schema=False)
+async def get_dashboard_stats_v1():
     """获取Dashboard性能统计信息（无需认证）"""
     try:
         monitor = get_performance_monitor()

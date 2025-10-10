@@ -359,7 +359,7 @@
         // 获取性能数据
         async function fetchPerformanceData() {
             try {
-                const response = await fetch(`${API_BASE}/api/dashboard/stats`);
+                const response = await fetch(`${API_BASE}/v1/dashboard/stats`);
                 
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
