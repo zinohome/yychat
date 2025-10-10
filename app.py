@@ -314,8 +314,8 @@ async def clear_conversation_memory(conversation_id: str, api_key: str = Depends
 
 # 获取会话记忆API
 @app.get("/v1/conversations/{conversation_id}/memory", tags=["Services"])
-async def get_conversation_memory(conversation_id: str, api_key: str = Depends(verify_api_key)):
-    result = await chat_engine.get_conversation_memory(conversation_id)
+async def get_conversation_memory(conversation_id: str, limit: int | None = None, api_key: str = Depends(verify_api_key)):
+    result = await chat_engine.get_conversation_memory(conversation_id, limit=limit)
     if result.get("success", False):
         return {
             "object": "list",
@@ -330,34 +330,22 @@ async def get_conversation_memory(conversation_id: str, api_key: str = Depends(v
             "error": result.get("error", "Unknown error")
         }
 
-@app.get("/api/verify-memory/{conversation_id}", tags=["Services"])
+@app.get("/api/verify-memory/{conversation_id}", tags=["Services"], include_in_schema=False)
 async def verify_memory(conversation_id: str, api_key: str = Depends(verify_api_key)):
-    """验证指定会话ID的记忆是否存在"""
-    try:
-        result = await chat_engine.get_conversation_memory(conversation_id)
-        if result.get("success", False):
-            memories = result.get("memories", [])
-            return {
-                "success": True,
-                "conversation_id": conversation_id,
-                "memory_count": result.get("total_count", 0),
-                "memories": memories[:5]  # 只返回前5条避免响应过大
-            }
-        else:
-            return {
-                "success": False,
-                "conversation_id": conversation_id,
-                "memory_count": 0,
-                "memories": [],
-                "error": result.get("error", "Unknown error")
-            }
-    except Exception as e:
+    """Deprecated: 请使用 /v1/conversations/{conversation_id}/memory?limit=5"""
+    result = await chat_engine.get_conversation_memory(conversation_id, limit=5)
+    if result.get("success", False):
         return {
-            "success": False,
-            "conversation_id": conversation_id,
-            "memory_count": 0,
-            "memories": [],
-            "error": str(e)
+            "object": "list",
+            "data": result.get("memories", []),
+            "total": result.get("total_count", 0)
+        }
+    else:
+        return {
+            "object": "list",
+            "data": [],
+            "total": 0,
+            "error": result.get("error", "Unknown error")
         }
 
 # MCP服务调用API
