@@ -2,7 +2,7 @@ import json
 import os
 from functools import lru_cache
 from pydantic import BaseModel, Field, ValidationError
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Any
 from utils.log import log
 
 
@@ -91,6 +91,20 @@ class PersonalityManager:
             {"id": p.id, "name": p.name}
             for p in self.personalities.values()
         ]
+    
+    def get_all_personalities(self) -> Dict[str, Dict[str, Any]]:
+        """获取所有人格的详细信息"""
+        result = {}
+        for pid, personality in self.personalities.items():
+            result[pid] = {
+                "id": personality.id,
+                "name": personality.name,
+                "system_prompt": personality.system_prompt,
+                "traits": personality.traits,
+                "examples": personality.examples,
+                "allowed_tools": personality.allowed_tools
+            }
+        return result
     
     def apply_personality(self, messages: List[Dict[str, str]], personality_id: str) -> List[Dict[str, str]]:
         personality = self.get_personality(personality_id)
