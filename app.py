@@ -298,36 +298,65 @@ async def list_personalities(api_key: str = Depends(verify_api_key)):
 # 清除会话记忆API
 @app.delete("/v1/conversations/{conversation_id}/memory", tags=["Services"])
 async def clear_conversation_memory(conversation_id: str, api_key: str = Depends(verify_api_key)):
-    chat_engine.clear_conversation_memory(conversation_id)
-    return {
-        "success": True,
-        "message": f"Memory for conversation {conversation_id} cleared"
-    }
+    result = await chat_engine.clear_conversation_memory(conversation_id)
+    if result.get("success", False):
+        return {
+            "success": True,
+            "message": f"Memory for conversation {conversation_id} cleared",
+            "deleted_count": result.get("deleted_count", 0)
+        }
+    else:
+        return {
+            "success": False,
+            "message": result.get("message", "Failed to clear memory"),
+            "error": result.get("error", "Unknown error")
+        }
 
 # 获取会话记忆API
 @app.get("/v1/conversations/{conversation_id}/memory", tags=["Services"])
 async def get_conversation_memory(conversation_id: str, api_key: str = Depends(verify_api_key)):
-    memories = chat_engine.get_conversation_memory(conversation_id)
-    return {
-        "object": "list",
-        "data": memories,
-        "total": len(memories)
-    }
+    result = await chat_engine.get_conversation_memory(conversation_id)
+    if result.get("success", False):
+        return {
+            "object": "list",
+            "data": result.get("memories", []),
+            "total": result.get("total_count", 0)
+        }
+    else:
+        return {
+            "object": "list",
+            "data": [],
+            "total": 0,
+            "error": result.get("error", "Unknown error")
+        }
 
 @app.get("/api/verify-memory/{conversation_id}", tags=["Services"])
 async def verify_memory(conversation_id: str, api_key: str = Depends(verify_api_key)):
     """验证指定会话ID的记忆是否存在"""
     try:
-        memories = chat_engine.get_conversation_memory(conversation_id)
-        return {
-            "success": True,
-            "conversation_id": conversation_id,
-            "memory_count": len(memories),
-            "memories": memories[:5]  # 只返回前5条避免响应过大
-        }
+        result = await chat_engine.get_conversation_memory(conversation_id)
+        if result.get("success", False):
+            memories = result.get("memories", [])
+            return {
+                "success": True,
+                "conversation_id": conversation_id,
+                "memory_count": result.get("total_count", 0),
+                "memories": memories[:5]  # 只返回前5条避免响应过大
+            }
+        else:
+            return {
+                "success": False,
+                "conversation_id": conversation_id,
+                "memory_count": 0,
+                "memories": [],
+                "error": result.get("error", "Unknown error")
+            }
     except Exception as e:
         return {
             "success": False,
+            "conversation_id": conversation_id,
+            "memory_count": 0,
+            "memories": [],
             "error": str(e)
         }
 
@@ -349,7 +378,7 @@ async def call_mcp_service(request: MCPServiceCallRequest, api_key: str = Depend
                 raise HTTPException(status_code=400, detail={"error": {"message": "Missing tool_name or both service_name and method_name", "type": "validation_error"}})
         
         # 调用MCP服务，传递所有必要参数
-        result = chat_engine.call_mcp_service(
+        result = await chat_engine.call_mcp_service(
             tool_name=tool_name,
             params=params,
             service_name=request.service_name,
@@ -387,25 +416,18 @@ async def root():
 async def list_available_tools(api_key: str = Depends(verify_api_key)):
     """列出所有已注册的非MCP工具"""
     try:
-        # 获取所有工具
-        all_tools = tool_registry.list_tools()
-        
-        # 尝试获取MCP工具名称，如果失败则忽略MCP工具
-        mcp_tool_names = set()
-        try:
-            mcp_tools = mcp_manager.list_tools()
-            mcp_tool_names = {tool["name"] for tool in mcp_tools}
-        except Exception as mcp_error:
-            log.warning(f"MCP service unavailable, listing all tools without MCP filtering: {str(mcp_error)}")
+        # 使用工具注册表的类型过滤功能，只获取非MCP工具
+        non_mcp_tools = tool_registry.list_tools(tool_type=None)  # 获取所有工具
+        mcp_tools = tool_registry.list_tools(tool_type="mcp")     # 获取MCP工具
         
         # 过滤掉MCP工具，只保留非MCP工具
-        non_mcp_tools = {name: tool for name, tool in all_tools.items() if name not in mcp_tool_names}
+        filtered_tools = {name: tool for name, tool in non_mcp_tools.items() if name not in mcp_tools}
         
         return {
             "tools": [{
                 "name": tool.name,
                 "description": tool.description
-            } for tool in non_mcp_tools.values()]
+            } for tool in filtered_tools.values()]
         }
     except Exception as e:
         log.error(f"Failed to list tools: {str(e)}")
@@ -416,12 +438,15 @@ async def list_available_tools(api_key: str = Depends(verify_api_key)):
 async def list_available_mcp_tools(api_key: str = Depends(verify_api_key)):
     """列出所有已注册的MCP工具"""
     try:
-        # 使用mcp_manager获取MCP工具列表
-        mcp_tools = mcp_manager.list_tools()
+        # 从工具注册表中获取MCP工具
+        mcp_tools = tool_registry.list_tools(tool_type="mcp")
         
         # 格式化返回结果，保持与现有工具API一致的格式
         return {
-            "tools": [{k: v for k, v in tool.items() if k in ["name", "description"]} for tool in mcp_tools]
+            "tools": [{
+                "name": tool.name,
+                "description": tool.description
+            } for tool in mcp_tools.values()]
         }
     except Exception as e:
         log.error(f"Failed to list MCP tools: {str(e)}")

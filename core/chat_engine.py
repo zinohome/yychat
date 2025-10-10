@@ -180,8 +180,11 @@ class ChatEngine(BaseEngine):
             # 记录总请求处理时间
             log.debug(f"总请求处理时间一: {time.time() - total_start_time:.2f}秒")
             if stream:
-                # 直接返回异步生成器方法调用
-                return self._generate_streaming_response(request_params, conversation_id, messages, personality_id, metrics)
+                # 包装异步生成器以确保性能指标被记录
+                return self._wrap_streaming_response_with_performance(
+                    self._generate_streaming_response(request_params, conversation_id, messages, personality_id, metrics),
+                    metrics, total_start_time
+                )
             else:
                 result = await self._generate_non_streaming_response(request_params, conversation_id, messages, personality_id, metrics)
                 
@@ -273,6 +276,45 @@ class ChatEngine(BaseEngine):
             if hasattr(e, 'response') and hasattr(e.response, 'text'):
                 detailed_error += f"\n响应内容: {e.response.text[:200]}..."
             return {"role": "assistant", "content": f"抱歉，我现在无法为您提供帮助。错误信息: {detailed_error}"}
+    
+    async def _wrap_streaming_response_with_performance(
+        self, 
+        streaming_generator: AsyncGenerator[Dict[str, Any], None], 
+        metrics: PerformanceMetrics, 
+        total_start_time: float
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """包装流式响应生成器，确保性能指标被记录"""
+        log.info(f"[PERF WRAPPER] 开始包装流式响应，request_id={metrics.request_id}")
+        first_chunk_time = None
+        chunk_count = 0
+        
+        try:
+            async for chunk in streaming_generator:
+                chunk_count += 1
+                if chunk_count == 1:
+                    first_chunk_time = time.time()
+                    log.debug(f"流式响应首字节时间: {first_chunk_time - total_start_time:.2f}秒")
+                
+                log.debug(f"流式响应chunk {chunk_count}: {chunk}")
+                yield chunk
+                
+        except Exception as e:
+            log.error(f"流式响应包装器出错: {e}")
+            # 重新抛出异常
+            raise e
+        finally:
+            # 无论是否发生异常，都记录性能指标
+            log.info(f"[PERF WRAPPER] 流式响应完成（finally块），chunk_count={chunk_count}")
+            metrics.total_time = time.time() - total_start_time
+            if first_chunk_time:
+                metrics.first_chunk_time = first_chunk_time - total_start_time
+            metrics.openai_api_time = metrics.total_time  # 流式响应中，总时间就是API时间
+            
+            log.info(f"[PERF WRAPPER] 准备记录性能指标: ENABLE={config.ENABLE_PERFORMANCE_MONITOR}, total_time={metrics.total_time:.3f}s")
+            if config.ENABLE_PERFORMANCE_MONITOR:
+                log.info(f"[PERF] 记录流式响应性能指标: total_time={metrics.total_time:.3f}s, chunks={chunk_count}, stream=True")
+                performance_monitor.record(metrics, log_enabled=config.PERFORMANCE_LOG_ENABLED)
+                log.info(f"[PERF] 性能指标已记录")
     
     async def _generate_streaming_response(
         self, 
@@ -751,7 +793,7 @@ class ChatEngine(BaseEngine):
             count_before = len(current_memories) if current_memories else 0
             
             # 清除记忆
-            self.async_chat_memory.clear_conversation(conversation_id)
+            await self.async_chat_memory.delete_memory(conversation_id)
             
             return {
                 "success": True,

@@ -457,6 +457,44 @@ class AsyncChatMemory:
             log.error(f"异步批量添加消息失败: {e}")
             raise
 
+    async def get_all_memory(self, conversation_id: str) -> list:
+        """异步获取所有记忆"""
+        try:
+            memories = await self.memory.get_all(user_id=conversation_id)
+            
+            # 检查memories的格式并相应处理
+            if isinstance(memories, list):
+                result = []
+                for mem in memories:
+                    # 如果mem是字典并且有content键，获取content值
+                    if isinstance(mem, dict) and "content" in mem:
+                        result.append(mem["content"])
+                    # 如果mem是字符串，直接添加
+                    elif isinstance(mem, str):
+                        result.append(mem)
+                    # 其他类型转换为字符串
+                    else:
+                        result.append(str(mem))
+                return result
+            # 如果memories不是列表，转换为列表返回
+            elif memories is not None:
+                return [str(memories)]
+            else:
+                return []
+        except Exception as e:
+            log.error(f"Failed to get all async memory: {e}")
+            return []
+
+    async def delete_memory(self, conversation_id: str):
+        """异步删除记忆"""
+        try:
+            # 清除缓存
+            self._invalidate_cache(conversation_id)
+            
+            await self.memory.delete_all(user_id=conversation_id)
+        except Exception as e:
+            log.error(f"Failed to delete async memory: {e}")
+
 
 # 全局实例
 _async_chat_memory = None

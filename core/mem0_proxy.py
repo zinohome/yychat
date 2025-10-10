@@ -15,6 +15,9 @@ from services.mcp.exceptions import MCPServiceError, MCPServerNotFoundError, MCP
 from core.base_engine import BaseEngine, EngineCapabilities, EngineStatus
 # 工具规范化
 from core.tools_adapter import normalize_tool_calls, build_tool_response_messages
+# 性能监控
+from utils.performance import performance_monitor, PerformanceMetrics
+import uuid
 
 
 class Mem0Client:
@@ -478,6 +481,17 @@ class FallbackHandler:
 
     async def handle_fallback(self, messages: List[Dict[str, str]], conversation_id: str, personality_id: Optional[str] = None, use_tools: bool = False, stream: bool = False) -> Union[Dict[str, Any], AsyncGenerator[Dict[str, Any], None]]:
         """处理OpenAI降级，支持所有功能"""
+        total_start_time = time.time()
+        
+        # 创建性能指标对象
+        metrics = PerformanceMetrics(
+            request_id=str(uuid.uuid4())[:8],
+            timestamp=total_start_time,
+            stream=stream,
+            use_tools=use_tools,
+            personality_id=personality_id
+        )
+        
         try:
             if not self.openai_client.get_client():
                 raise Exception("OpenAI客户端未初始化")
@@ -496,14 +510,26 @@ class FallbackHandler:
                 call_params["tool_choice"] = "auto"
 
             # 调用OpenAI API
+            api_start_time = time.time()
             response = self.openai_client.get_client().chat.completions.create(**call_params)
+            metrics.openai_api_time = time.time() - api_start_time
 
             if stream:
-                # 处理流式响应（不要await异步生成器，直接返回由处理器实现的异步生成器）
-                return self._handle_openai_streaming_response(response, conversation_id, messages)
+                # 包装流式响应以确保性能指标被记录
+                return self._wrap_fallback_streaming_response_with_performance(
+                    self._handle_openai_streaming_response(response, conversation_id, messages),
+                    metrics, total_start_time
+                )
             else:
                 # 处理非流式响应
-                return await self._handle_openai_non_streaming_response(response, conversation_id, messages)
+                result = await self._handle_openai_non_streaming_response(response, conversation_id, messages)
+                metrics.total_time = time.time() - total_start_time
+                
+                # 记录性能指标
+                if config.ENABLE_PERFORMANCE_MONITOR:
+                    performance_monitor.record(metrics, log_enabled=config.PERFORMANCE_LOG_ENABLED)
+                
+                return result
         except Exception as e:
             log.error(f"OpenAI降级处理失败: {e}")
             if stream:
@@ -610,6 +636,44 @@ class FallbackHandler:
             log.error(f"处理OpenAI非流式响应时出错: {e}")
             return {"role": "assistant", "content": f"发生内部错误: {str(e)}"}
 
+    async def _wrap_fallback_streaming_response_with_performance(
+        self, 
+        streaming_generator: AsyncGenerator[Dict[str, Any], None], 
+        metrics: PerformanceMetrics, 
+        total_start_time: float
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """包装降级流式响应生成器，确保性能指标被记录"""
+        try:
+            first_chunk_time = None
+            chunk_count = 0
+            
+            async for chunk in streaming_generator:
+                chunk_count += 1
+                if chunk_count == 1:
+                    first_chunk_time = time.time()
+                    log.debug(f"降级流式响应首字节时间: {first_chunk_time - total_start_time:.2f}秒")
+                
+                yield chunk
+            
+            # 流式响应完成，记录性能指标
+            metrics.total_time = time.time() - total_start_time
+            if first_chunk_time:
+                metrics.first_chunk_time = first_chunk_time - total_start_time
+            
+            if config.ENABLE_PERFORMANCE_MONITOR:
+                log.debug(f"[PERF] 记录降级流式响应性能指标: total_time={metrics.total_time:.3f}s, chunks={chunk_count}, stream=True")
+                performance_monitor.record(metrics, log_enabled=config.PERFORMANCE_LOG_ENABLED)
+                
+        except Exception as e:
+            log.error(f"降级流式响应包装器出错: {e}")
+            # 记录错误情况下的性能指标
+            metrics.total_time = time.time() - total_start_time
+            if config.ENABLE_PERFORMANCE_MONITOR:
+                performance_monitor.record(metrics, log_enabled=config.PERFORMANCE_LOG_ENABLED)
+            
+            # 重新抛出异常
+            raise e
+
 
 class Mem0ChatEngine(BaseEngine):
     """基于Mem0官方Proxy接口的聊天引擎"""
@@ -704,14 +768,25 @@ class Mem0ChatEngine(BaseEngine):
         stream: bool = False
     ) -> Union[Dict[str, Any], AsyncGenerator[Dict[str, Any], None]]:
         """主响应生成方法"""
-        start_time = time.time()
+        total_start_time = time.time()
+        
+        # 创建性能指标对象
+        metrics = PerformanceMetrics(
+            request_id=str(uuid.uuid4())[:8],
+            timestamp=total_start_time,
+            stream=stream,
+            use_tools=use_tools,
+            personality_id=personality_id
+        )
 
         try:
             # 记录请求信息
             log.debug(f"收到生成响应请求，对话ID: {conversation_id}, 人格ID: {personality_id}")
 
             # 1. 应用personality
+            personality_start_time = time.time()
             processed_messages = await self.personality_handler.apply_personality(messages, personality_id)
+            metrics.personality_apply_time = time.time() - personality_start_time
 
             # 2. 准备调用参数
             call_params = self._prepare_call_params(processed_messages, conversation_id, use_tools, stream)
@@ -731,13 +806,27 @@ class Mem0ChatEngine(BaseEngine):
 
             # 5. 尝试使用Mem0
             if stream:
-                return self.response_handler.handle_streaming_response(
-                    client, call_params, conversation_id, processed_messages
+                # 包装流式响应以确保性能指标被记录
+                return self._wrap_streaming_response_with_performance(
+                    self.response_handler.handle_streaming_response(
+                        client, call_params, conversation_id, processed_messages
+                    ),
+                    metrics, total_start_time
                 )
             else:
-                return await self.response_handler.handle_non_streaming_response(
+                # 非流式响应
+                api_start_time = time.time()
+                result = await self.response_handler.handle_non_streaming_response(
                     client, call_params, conversation_id, processed_messages
                 )
+                metrics.openai_api_time = time.time() - api_start_time
+                metrics.total_time = time.time() - total_start_time
+                
+                # 记录性能指标
+                if config.ENABLE_PERFORMANCE_MONITOR:
+                    performance_monitor.record(metrics, log_enabled=config.PERFORMANCE_LOG_ENABLED)
+                
+                return result
 
         except Exception as e:
             log.error(f"使用Mem0代理生成响应失败: {e}")
@@ -747,6 +836,45 @@ class Mem0ChatEngine(BaseEngine):
             )
         finally:
             log.debug(f"Mem0代理响应生成耗时: {time.time() - start_time:.3f}秒")
+
+    async def _wrap_streaming_response_with_performance(
+        self, 
+        streaming_generator: AsyncGenerator[Dict[str, Any], None], 
+        metrics: PerformanceMetrics, 
+        total_start_time: float
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """包装流式响应生成器，确保性能指标被记录"""
+        try:
+            first_chunk_time = None
+            chunk_count = 0
+            
+            async for chunk in streaming_generator:
+                chunk_count += 1
+                if chunk_count == 1:
+                    first_chunk_time = time.time()
+                    log.debug(f"流式响应首字节时间: {first_chunk_time - total_start_time:.2f}秒")
+                
+                yield chunk
+            
+            # 流式响应完成，记录性能指标
+            metrics.total_time = time.time() - total_start_time
+            if first_chunk_time:
+                metrics.first_chunk_time = first_chunk_time - total_start_time
+            metrics.openai_api_time = metrics.total_time  # 流式响应中，总时间就是API时间
+            
+            if config.ENABLE_PERFORMANCE_MONITOR:
+                log.debug(f"[PERF] 记录流式响应性能指标: total_time={metrics.total_time:.3f}s, chunks={chunk_count}, stream=True")
+                performance_monitor.record(metrics, log_enabled=config.PERFORMANCE_LOG_ENABLED)
+                
+        except Exception as e:
+            log.error(f"流式响应包装器出错: {e}")
+            # 记录错误情况下的性能指标
+            metrics.total_time = time.time() - total_start_time
+            if config.ENABLE_PERFORMANCE_MONITOR:
+                performance_monitor.record(metrics, log_enabled=config.PERFORMANCE_LOG_ENABLED)
+            
+            # 重新抛出异常
+            raise e
 
     async def clear_conversation_memory(self, conversation_id: str) -> Dict[str, Any]:
         """清除指定会话的记忆"""
