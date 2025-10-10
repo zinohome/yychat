@@ -30,3 +30,4 @@ config.yaml
 /chroma_db/
 # Archive directory
 archive/
+/.coverage
