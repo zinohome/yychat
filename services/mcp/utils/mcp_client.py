@@ -317,9 +317,9 @@ class McpSseClient(McpClient):
             "method": "notifications/initialized",
             "params": {}
         }
-        response = self.send_message(notify_data)
-        if "error" in response:
-            raise Exception(f"MCP Server notifications/initialized error: {response['error']}")
+        notify_response = self.send_message(notify_data)
+        if "error" in notify_response:
+            raise Exception(f"MCP Server notifications/initialized error: {notify_response['error']}")
 
 
 class McpStreamableHttpClient(McpClient):
@@ -399,9 +399,9 @@ class McpStreamableHttpClient(McpClient):
             "method": "notifications/initialized",
             "params": {}
         }
-        response = self.send_message(notify_data)
-        if "error" in response:
-            raise Exception(f"MCP Server notifications/initialized error: {response['error']}")
+        notify_response = self.send_message(notify_data)
+        if "error" in notify_response:
+            raise Exception(f"MCP Server notifications/initialized error: {notify_response['error']}")
 
 
 class ActionType(Enum):

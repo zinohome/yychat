@@ -390,9 +390,13 @@ async def list_available_tools(api_key: str = Depends(verify_api_key)):
         # 获取所有工具
         all_tools = tool_registry.list_tools()
         
-        # 获取所有MCP工具名称
-        mcp_tools = mcp_manager.list_tools()
-        mcp_tool_names = {tool["name"] for tool in mcp_tools}
+        # 尝试获取MCP工具名称，如果失败则忽略MCP工具
+        mcp_tool_names = set()
+        try:
+            mcp_tools = mcp_manager.list_tools()
+            mcp_tool_names = {tool["name"] for tool in mcp_tools}
+        except Exception as mcp_error:
+            log.warning(f"MCP service unavailable, listing all tools without MCP filtering: {str(mcp_error)}")
         
         # 过滤掉MCP工具，只保留非MCP工具
         non_mcp_tools = {name: tool for name, tool in all_tools.items() if name not in mcp_tool_names}
@@ -421,7 +425,14 @@ async def list_available_mcp_tools(api_key: str = Depends(verify_api_key)):
         }
     except Exception as e:
         log.error(f"Failed to list MCP tools: {str(e)}")
-        raise HTTPException(status_code=500, detail={"error": {"message": str(e), "type": "mcp_service_error"}})
+        # 返回空列表而不是抛出异常，这样客户端可以知道MCP服务不可用但仍然可以继续工作
+        return {
+            "tools": [],
+            "error": {
+                "message": f"MCP service temporarily unavailable: {str(e)}",
+                "type": "mcp_service_error"
+            }
+        }
 
 # 工具调用API - 用于调用非MCP工具
 @app.post("/v1/tools/call", tags=["Services"])

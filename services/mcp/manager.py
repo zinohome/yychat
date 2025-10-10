@@ -62,12 +62,14 @@ class MCPManager:
     def list_tools(self) -> List[Dict]:
         """列出所有可用的MCP工具"""
         if not self._clients:
+            log.warning("MCP clients not initialized, returning empty tool list")
             return []
         try:
             return self._clients.fetch_tools()
         except Exception as e:
             log.error(f"Failed to list MCP tools: {str(e)}")
-            raise MCPServiceError(f"Failed to list MCP tools: {str(e)}")
+            # 不抛出异常，而是返回空列表，让调用者可以继续工作
+            return []
     
     def call_tool(self, tool_name: str, arguments: Dict[str, Any], mcp_server: str = None) -> List[Dict]:
         """调用指定的MCP工具，可以选择特定的MCP服务器"""
