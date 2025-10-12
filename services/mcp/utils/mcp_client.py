@@ -57,7 +57,7 @@ class McpClient(ABC):
                 return []
             raise Exception(f"{self.name} - MCP Server tools/list error: {error}")
         tools = response.get("result", {}).get("tools", [])
-        log.debug(f"{self.name} - MCP Server tools/list: {tools}")
+        #log.debug(f"{self.name} - MCP Server tools/list: {tools}")
         return tools
 
     def call_tool(self, name: str, arguments: dict) -> list[dict]:
@@ -228,7 +228,7 @@ class McpSseClient(McpClient):
                                 raise ValueError(error_msg)
                         case "message":
                             message = json.loads(sse.data)
-                            log.debug(f"{self.name} - Received server message: {message}")
+                            #log.debug(f"{self.name} - Received server message: {message}")
                             self.message_dict[message["id"]] = message
                             self.response_ready.set()
                         case _:
@@ -263,9 +263,9 @@ class McpSseClient(McpClient):
                 self.response_ready.wait()
                 self.response_ready.clear()
                 if message_id in self.message_dict:
-                    log.debug(f"message_id: {message_id}")
+                    #log.debug(f"message_id: {message_id}")
                     message = self.message_dict.pop(message_id, None)
-                    log.debug(f"message: {message}")
+                    #log.debug(f"message: {message}")
                     if message and message.get("method") == "ping":
                         continue
                     return message
@@ -481,7 +481,7 @@ class McpClients:
                 
                 # 其余代码保持不变...
             
-            log.debug(f"Fetching tools: {all_tools}")
+            #log.debug(f"Fetching tools: {all_tools}")
             return all_tools
         except Exception as e:
             raise Exception(f"Error fetching tools: {str(e)}")
