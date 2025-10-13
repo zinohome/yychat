@@ -1,6 +1,8 @@
 import json
 import asyncio
-from fastapi import FastAPI, HTTPException, Depends, Request
+import uuid
+import io
+from fastapi import FastAPI, HTTPException, Depends, Request, WebSocket, WebSocketDisconnect, UploadFile, File
 from fastapi.responses import StreamingResponse, HTMLResponse, FileResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
@@ -25,6 +27,13 @@ from services.tools.manager import ToolManager
 # 添加引擎管理器导入
 from core.engine_manager import get_engine_manager, get_current_engine
 from core.chat_engine import ChatEngine
+# 添加WebSocket相关导入
+from core.websocket_manager import websocket_manager
+from core.message_router import message_router
+# 添加音频服务导入
+from services.audio_service import audio_service
+from services.voice_personality_service import voice_personality_service
+from utils.audio_utils import AudioUtils
 
 # 导入Pydantic模型
 from schemas.api_schemas import (
@@ -591,6 +600,333 @@ async def get_dashboard():
         return FileResponse(dashboard_path)
     else:
         raise HTTPException(status_code=404, detail={"error": {"message": "Dashboard not found", "type": "not_found"}})
+
+
+# ==================== WebSocket端点 ====================
+
+@app.websocket("/ws/chat")
+async def websocket_chat(websocket: WebSocket):
+    """
+    WebSocket聊天端点
+    支持实时语音和文本聊天
+    """
+    # 生成客户端ID
+    client_id = str(uuid.uuid4())
+    
+    try:
+        # 建立连接
+        success = await websocket_manager.connect(websocket, client_id)
+        if not success:
+            await websocket.close()
+            return
+        
+        log.info(f"WebSocket连接已建立: {client_id}")
+        
+        # 消息处理循环
+        while True:
+            try:
+                # 检查连接状态
+                if client_id not in websocket_manager.active_connections:
+                    log.warning(f"客户端连接已丢失: {client_id}")
+                    break
+                
+                # 接收消息
+                data = await websocket.receive_text()
+                message = json.loads(data)
+                
+                # 路由消息
+                await message_router.route_message(client_id, message)
+                
+            except WebSocketDisconnect:
+                log.info(f"WebSocket连接断开: {client_id}")
+                break
+            except json.JSONDecodeError as e:
+                log.error(f"JSON解析错误: {client_id}, 错误: {e}")
+                try:
+                    await websocket_manager.send_message(client_id, {
+                        "type": "error",
+                        "error": {
+                            "message": "Invalid JSON format",
+                            "type": "json_parse_error",
+                            "code": "invalid_json"
+                        }
+                    })
+                except Exception as send_error:
+                    log.error(f"发送错误消息失败: {client_id}, 错误: {send_error}")
+                    break
+            except Exception as e:
+                log.error(f"WebSocket消息处理错误: {client_id}, 错误: {e}")
+                try:
+                    await websocket_manager.send_message(client_id, {
+                        "type": "error",
+                        "error": {
+                            "message": "Message processing error",
+                            "type": "processing_error",
+                            "code": "processing_failed"
+                        }
+                    })
+                except Exception as send_error:
+                    log.error(f"发送错误消息失败: {client_id}, 错误: {send_error}")
+                    break
+    
+    except Exception as e:
+        log.error(f"WebSocket连接错误: {client_id}, 错误: {e}")
+    finally:
+        # 清理连接
+        await websocket_manager.disconnect(client_id)
+
+
+@app.get("/ws/status", tags=["WebSocket"])
+async def get_websocket_status():
+    """获取WebSocket连接状态"""
+    stats = websocket_manager.get_connection_stats()
+    return {
+        "status": "success",
+        "data": stats
+    }
+
+
+@app.get("/ws/handlers", tags=["WebSocket"])
+async def get_websocket_handlers():
+    """获取已注册的WebSocket消息处理器"""
+    handlers = message_router.get_registered_handlers()
+    middleware = message_router.get_middleware_list()
+    return {
+        "status": "success",
+        "data": {
+            "handlers": handlers,
+            "middleware": middleware
+        }
+    }
+
+
+# ==================== 音频API端点 ====================
+
+@app.get("/v1/audio/test", tags=["Audio"])
+async def test_audio_endpoint():
+    """测试音频端点是否工作"""
+    return {"status": "success", "message": "音频端点工作正常"}
+
+@app.post("/v1/audio/transcriptions", tags=["Audio"])
+async def create_transcription(
+    audio_file: UploadFile = File(...),
+    model: str = "whisper-1",
+    api_key: str = Depends(verify_api_key)
+):
+    """
+    创建音频转录
+    兼容OpenAI Audio API
+    """
+    try:
+        # 验证文件类型
+        if not audio_file.content_type or not audio_file.content_type.startswith('audio/'):
+            raise HTTPException(
+                status_code=400,
+                detail={"error": {"message": "文件必须是音频格式", "type": "invalid_request_error"}}
+            )
+        
+        # 读取音频数据
+        audio_data = await audio_file.read()
+        
+        # 验证音频格式
+        if not AudioUtils.validate_audio_format(audio_data):
+            raise HTTPException(
+                status_code=400,
+                detail={"error": {"message": "无效的音频格式", "type": "invalid_request_error"}}
+            )
+        
+        # 进行转录
+        transcribed_text = await audio_service.transcribe_audio(audio_data, model)
+        
+        return {
+            "text": transcribed_text
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"音频转录失败: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"message": f"音频转录失败: {str(e)}", "type": "server_error"}}
+        )
+
+
+@app.post("/v1/audio/speech", tags=["Audio"])
+async def create_speech(
+    request: dict,
+    api_key: str = Depends(verify_api_key)
+):
+    """
+    创建语音合成
+    兼容OpenAI Audio API
+    """
+    try:
+        # 验证请求参数
+        text = request.get("input", "")
+        voice = request.get("voice", "alloy")
+        model = request.get("model", "tts-1")
+        speed = request.get("speed", 1.0)
+        response_format = request.get("response_format", "mp3")
+        
+        if not text:
+            raise HTTPException(
+                status_code=400,
+                detail={"error": {"message": "文本内容不能为空", "type": "invalid_request_error"}}
+            )
+        
+        # 进行语音合成
+        audio_data = await audio_service.synthesize_speech(text, voice, model, speed)
+        
+        # 根据响应格式返回
+        if response_format == "mp3":
+            return StreamingResponse(
+                io.BytesIO(audio_data),
+                media_type="audio/mpeg",
+                headers={"Content-Disposition": "attachment; filename=speech.mp3"}
+            )
+        elif response_format == "wav":
+            return StreamingResponse(
+                io.BytesIO(audio_data),
+                media_type="audio/wav",
+                headers={"Content-Disposition": "attachment; filename=speech.wav"}
+            )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail={"error": {"message": "不支持的响应格式", "type": "invalid_request_error"}}
+            )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"语音合成失败: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"message": f"语音合成失败: {str(e)}", "type": "server_error"}}
+        )
+
+
+@app.get("/v1/audio/voices", tags=["Audio"])
+async def get_available_voices(api_key: str = Depends(verify_api_key)):
+    """获取可用的语音类型"""
+    try:
+        voices = audio_service.get_available_voices()
+        return {
+            "status": "success",
+            "data": voices
+        }
+    except Exception as e:
+        log.error(f"获取语音列表失败: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"message": f"获取语音列表失败: {str(e)}", "type": "server_error"}}
+        )
+
+
+@app.get("/v1/audio/models", tags=["Audio"])
+async def get_audio_models(api_key: str = Depends(verify_api_key)):
+    """获取可用的音频模型"""
+    try:
+        models = audio_service.get_available_models()
+        return {
+            "status": "success",
+            "data": models
+        }
+    except Exception as e:
+        log.error(f"获取音频模型列表失败: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"message": f"获取音频模型列表失败: {str(e)}", "type": "server_error"}}
+        )
+
+
+@app.get("/v1/audio/personality-voices", tags=["Audio"])
+async def get_personality_voices(api_key: str = Depends(verify_api_key)):
+    """获取人格语音映射"""
+    try:
+        mapping = voice_personality_service.get_personality_voice_mapping()
+        return {
+            "status": "success",
+            "data": mapping
+        }
+    except Exception as e:
+        log.error(f"获取人格语音映射失败: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"message": f"获取人格语音映射失败: {str(e)}", "type": "server_error"}}
+        )
+
+
+@app.post("/v1/audio/personality-voices/{personality_id}", tags=["Audio"])
+async def set_personality_voice(
+    personality_id: str,
+    request: dict,
+    api_key: str = Depends(verify_api_key)
+):
+    """设置人格语音类型"""
+    try:
+        voice = request.get("voice")
+        if not voice:
+            raise HTTPException(
+                status_code=400,
+                detail={"error": {"message": "语音类型不能为空", "type": "invalid_request_error"}}
+            )
+        
+        success = voice_personality_service.set_voice_for_personality(personality_id, voice)
+        if not success:
+            raise HTTPException(
+                status_code=400,
+                detail={"error": {"message": "设置人格语音失败", "type": "invalid_request_error"}}
+            )
+        
+        return {
+            "status": "success",
+            "message": f"人格 {personality_id} 的语音已设置为 {voice}"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"设置人格语音失败: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"message": f"设置人格语音失败: {str(e)}", "type": "server_error"}}
+        )
+
+
+@app.get("/v1/audio/cache/stats", tags=["Audio"])
+async def get_audio_cache_stats(api_key: str = Depends(verify_api_key)):
+    """获取音频缓存统计信息"""
+    try:
+        stats = audio_service.audio_cache.get_stats()
+        return {
+            "status": "success",
+            "data": stats
+        }
+    except Exception as e:
+        log.error(f"获取音频缓存统计失败: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"message": f"获取音频缓存统计失败: {str(e)}", "type": "server_error"}}
+        )
+
+
+@app.delete("/v1/audio/cache", tags=["Audio"])
+async def clear_audio_cache(api_key: str = Depends(verify_api_key)):
+    """清空音频缓存"""
+    try:
+        audio_service.audio_cache.clear()
+        return {
+            "status": "success",
+            "message": "音频缓存已清空"
+        }
+    except Exception as e:
+        log.error(f"清空音频缓存失败: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"message": f"清空音频缓存失败: {str(e)}", "type": "server_error"}}
+        )
 
 # 启动服务器
 if __name__ == "__main__":
