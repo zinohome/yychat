@@ -114,7 +114,15 @@ class MCPManager:
 
 
 # 创建全局MCP管理器实例
-mcp_manager = MCPManager()
+# 延迟初始化，避免重复创建
+mcp_manager = None
+
+def get_mcp_manager():
+    """获取MCP管理器实例（延迟初始化）"""
+    global mcp_manager
+    if mcp_manager is None:
+        mcp_manager = MCPManager()
+    return mcp_manager
 
 
 def call_tool(self, tool_name: str, params: dict, mcp_server: str = None):

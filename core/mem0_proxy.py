@@ -11,7 +11,7 @@ from utils.log import log
 from core.chat_memory import ChatMemory, get_async_chat_memory
 from core.personality_manager import PersonalityManager
 from services.tools.manager import ToolManager
-from services.mcp.manager import mcp_manager
+from services.mcp.manager import get_mcp_manager
 from services.mcp.exceptions import MCPServiceError, MCPServerNotFoundError, MCPToolNotFoundError
 # BaseEngine接口
 from core.base_engine import BaseEngine, EngineCapabilities, EngineStatus
@@ -1061,7 +1061,7 @@ class Mem0ChatEngine(BaseEngine):
             log.info(f"Calling MCP service: {tool_name}, params: {params}, server: {mcp_server or 'auto'}")
             
             # 使用MCP管理器调用服务，支持指定服务器
-            result = mcp_manager.call_tool(tool_name, params, mcp_server)
+            result = get_mcp_manager().call_tool(tool_name, params, mcp_server)
             
             # 更灵活的结果处理
             processed_result = []

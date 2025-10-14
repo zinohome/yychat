@@ -22,22 +22,22 @@ class EngineManager:
     """
     
     _instance = None
+    _initialized = False
     
     def __new__(cls):
-        """单例模式"""
+        """单例模式 - 改进版本，支持热重载"""
         if cls._instance is None:
             cls._instance = object.__new__(cls)
-            cls._instance._initialized = False
         return cls._instance
     
     def __init__(self):
         """初始化引擎管理器"""
-        if self._initialized:
+        if EngineManager._initialized:
             return
             
         self.engines: Dict[str, Any] = {}  # 引擎实例字典
         self.current_engine_name: str = ""  # 当前使用的引擎名称
-        self._initialized = True
+        EngineManager._initialized = True
         
         log.info("EngineManager初始化完成")
     

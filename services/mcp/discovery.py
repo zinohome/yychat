@@ -1,7 +1,7 @@
 from utils.log import log
 from typing import Dict, Any
 
-from services.mcp.manager import mcp_manager
+from services.mcp.manager import get_mcp_manager
 from services.tools.registry import tool_registry
 from services.tools.base import Tool
 
@@ -10,6 +10,9 @@ from services.tools.base import Tool
 def discover_and_register_mcp_tools():
     """发现并注册MCP工具"""
     try:
+        # 获取MCP管理器实例（延迟初始化）
+        mcp_manager = get_mcp_manager()
+        
         # 检查mcp_manager是否初始化成功
         if not hasattr(mcp_manager, '_clients') or mcp_manager._clients is None:
             log.warning("MCP manager not properly initialized, skipping tool discovery")

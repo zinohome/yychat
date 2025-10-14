@@ -10,23 +10,36 @@ project_root = os.path.dirname(base_dir)
 # 构造.env文件的绝对路径
 env_path = os.path.join(project_root, '.env')
 
-# 加载环境变量，并处理可能的错误
-try:
-    # find_dotenv会尝试定位.env文件，fallback到我们指定的路径
-    env_file = find_dotenv(usecwd=True) or env_path
+# 延迟加载环境变量，避免重复加载
+_env_loaded = False
+
+def load_env_file():
+    """加载.env文件（延迟初始化，避免重复加载）"""
+    global _env_loaded
+    if _env_loaded:
+        return
     
-    # 加载.env文件，如果不存在则尝试创建
-    if os.path.exists(env_file):
-        load_dotenv(dotenv_path=env_file, override=True)
-        print(f"成功加载.env文件: {env_file}")
-    else:
-        # 如果.env文件不存在，可以选择创建一个默认的
-        print(f".env文件不存在: {env_file}")
-        # 注意：如果要自动创建.env文件，可以取消下面的注释
-        # with open(env_file, 'w') as f:
-        #     f.write("# 默认环境变量配置\n")
-except Exception as e:
-    print(f"加载.env文件时出错: {str(e)}")
+    try:
+        # find_dotenv会尝试定位.env文件，fallback到我们指定的路径
+        env_file = find_dotenv(usecwd=True) or env_path
+        
+        # 加载.env文件，如果不存在则尝试创建
+        if os.path.exists(env_file):
+            load_dotenv(dotenv_path=env_file, override=True)
+            print(f"成功加载.env文件: {env_file}")
+        else:
+            # 如果.env文件不存在，可以选择创建一个默认的
+            print(f".env文件不存在: {env_file}")
+            # 注意：如果要自动创建.env文件，可以取消下面的注释
+            # with open(env_file, 'w') as f:
+            #     f.write("# 默认环境变量配置\n")
+        
+        _env_loaded = True
+    except Exception as e:
+        print(f"加载.env文件时出错: {str(e)}")
+
+# 在首次导入时加载环境变量
+load_env_file()
 
 # 添加以下配置项
 # 在Config类中添加

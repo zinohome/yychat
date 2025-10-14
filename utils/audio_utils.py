@@ -5,8 +5,17 @@
 
 import wave
 import struct
+import io
 from typing import Tuple, Optional
 from utils.log import log
+
+try:
+    from pydub import AudioSegment
+    from pydub.utils import which
+    PYDUB_AVAILABLE = True
+except ImportError:
+    PYDUB_AVAILABLE = False
+    log.warning("pydub未安装，音频格式转换功能将不可用")
 
 
 class AudioUtils:
@@ -76,23 +85,81 @@ class AudioUtils:
         
         Args:
             audio_data: 原始音频数据
-            target_format: 目标格式 (wav, mp3)
+            target_format: 目标格式 (wav, mp3, flac等)
             
         Returns:
             bytes: 转换后的音频数据
         """
         try:
-            if target_format.lower() == "wav":
-                return audio_data  # 已经是WAV格式
+            if not PYDUB_AVAILABLE:
+                log.warning("pydub不可用，返回原始音频数据")
+                return audio_data
             
-            # 这里可以添加其他格式转换逻辑
-            # 目前只支持WAV格式
-            log.warning(f"不支持的音频格式转换: {target_format}")
-            return audio_data
+            if not audio_data:
+                raise ValueError("音频数据不能为空")
+            
+            # 检测输入格式
+            input_format = AudioUtils._detect_audio_format(audio_data)
+            if not input_format:
+                log.warning("无法检测音频格式，尝试作为WAV处理")
+                input_format = "wav"
+            
+            log.info(f"音频格式转换: {input_format} → {target_format}")
+            
+            # 使用pydub进行格式转换
+            audio_segment = AudioSegment.from_file(io.BytesIO(audio_data), format=input_format)
+            
+            # 标准化音频参数 (Whisper推荐参数)
+            audio_segment = audio_segment.set_frame_rate(16000)  # 16kHz
+            audio_segment = audio_segment.set_channels(1)        # 单声道
+            audio_segment = audio_segment.set_sample_width(2)    # 16位
+            
+            # 转换格式
+            output_buffer = io.BytesIO()
+            audio_segment.export(output_buffer, format=target_format)
+            converted_data = output_buffer.getvalue()
+            
+            log.info(f"音频格式转换成功: {len(audio_data)} bytes → {len(converted_data)} bytes")
+            return converted_data
             
         except Exception as e:
             log.error(f"音频格式转换失败: {e}")
             return audio_data
+    
+    @staticmethod
+    def _detect_audio_format(audio_data: bytes) -> Optional[str]:
+        """
+        检测音频格式
+        
+        Args:
+            audio_data: 音频数据
+            
+        Returns:
+            Optional[str]: 检测到的格式，如果无法检测返回None
+        """
+        try:
+            if not audio_data:
+                return None
+            
+            # 检查文件头标识
+            if audio_data.startswith(b'RIFF') and b'WAVE' in audio_data[:12]:
+                return "wav"
+            elif audio_data.startswith(b'ID3') or audio_data.startswith(b'\xff\xfb'):
+                return "mp3"
+            elif audio_data.startswith(b'fLaC'):
+                return "flac"
+            elif audio_data.startswith(b'OggS'):
+                return "ogg"
+            elif audio_data.startswith(b'ftypM4A') or audio_data.startswith(b'ftypisom'):
+                return "m4a"
+            elif audio_data.startswith(b'\x1a\x45\xdf\xa3'):
+                return "webm"
+            else:
+                return None
+                
+        except Exception as e:
+            log.warning(f"音频格式检测失败: {e}")
+            return None
     
     @staticmethod
     def compress_audio(audio_data: bytes, quality: int = 80) -> bytes:
@@ -107,23 +174,51 @@ class AudioUtils:
             bytes: 压缩后的音频数据
         """
         try:
-            # 简单的音频压缩实现
-            # 这里可以根据需要实现更复杂的压缩算法
-            
-            if quality >= 90:
-                return audio_data  # 高质量，不压缩
-            
-            # 降低采样率进行压缩
-            audio_info = AudioUtils.get_audio_info(audio_data)
-            if not audio_info:
+            if not PYDUB_AVAILABLE:
+                log.warning("pydub不可用，返回原始音频数据")
                 return audio_data
             
-            # 如果采样率较高，可以降低采样率
-            if audio_info["frame_rate"] > 16000:
-                # 这里可以实现重采样逻辑
-                log.info(f"音频压缩: 原始采样率 {audio_info['frame_rate']}Hz")
+            if not audio_data:
+                raise ValueError("音频数据不能为空")
             
-            return audio_data
+            # 检测输入格式
+            input_format = AudioUtils._detect_audio_format(audio_data)
+            if not input_format:
+                log.warning("无法检测音频格式，尝试作为WAV处理")
+                input_format = "wav"
+            
+            log.info(f"音频压缩: 质量 {quality}, 格式 {input_format}")
+            
+            # 使用pydub进行音频压缩
+            audio_segment = AudioSegment.from_file(io.BytesIO(audio_data), format=input_format)
+            
+            # 标准化音频参数
+            audio_segment = audio_segment.set_frame_rate(16000)  # 16kHz
+            audio_segment = audio_segment.set_channels(1)        # 单声道
+            audio_segment = audio_segment.set_sample_width(2)    # 16位
+            
+            # 根据质量参数选择压缩方式
+            output_buffer = io.BytesIO()
+            if quality >= 90:
+                # 高质量：使用WAV格式
+                audio_segment.export(output_buffer, format="wav")
+            elif quality >= 70:
+                # 中等质量：使用MP3格式
+                audio_segment.export(output_buffer, format="mp3", bitrate="128k")
+            elif quality >= 50:
+                # 低质量：使用MP3格式
+                audio_segment.export(output_buffer, format="mp3", bitrate="64k")
+            else:
+                # 极低质量：使用MP3格式
+                audio_segment.export(output_buffer, format="mp3", bitrate="32k")
+            
+            compressed_data = output_buffer.getvalue()
+            
+            # 计算压缩比
+            compression_ratio = len(compressed_data) / len(audio_data) * 100
+            log.info(f"音频压缩成功: {len(audio_data)} bytes → {len(compressed_data)} bytes (压缩比: {compression_ratio:.1f}%)")
+            
+            return compressed_data
             
         except Exception as e:
             log.error(f"音频压缩失败: {e}")
@@ -141,18 +236,48 @@ class AudioUtils:
             bytes: 标准化后的音频数据
         """
         try:
-            audio_info = AudioUtils.get_audio_info(audio_data)
-            if not audio_info:
+            if not PYDUB_AVAILABLE:
+                log.warning("pydub不可用，返回原始音频数据")
                 return audio_data
             
-            # 检查是否需要标准化
-            if audio_info["frame_rate"] == 16000 and audio_info["channels"] == 1:
-                return audio_data  # 已经是标准格式
+            if not audio_data:
+                raise ValueError("音频数据不能为空")
             
-            # 这里可以实现音频标准化逻辑
-            log.info(f"音频标准化: {audio_info['frame_rate']}Hz, {audio_info['channels']}声道")
+            # 检测输入格式
+            input_format = AudioUtils._detect_audio_format(audio_data)
+            if not input_format:
+                log.warning("无法检测音频格式，尝试作为WAV处理")
+                input_format = "wav"
             
-            return audio_data
+            # 使用pydub进行音频标准化
+            audio_segment = AudioSegment.from_file(io.BytesIO(audio_data), format=input_format)
+            
+            # 获取原始音频信息
+            original_info = {
+                "frame_rate": audio_segment.frame_rate,
+                "channels": audio_segment.channels,
+                "sample_width": audio_segment.sample_width,
+                "duration": len(audio_segment) / 1000.0  # 秒
+            }
+            
+            log.info(f"音频标准化前: {original_info['frame_rate']}Hz, {original_info['channels']}声道, {original_info['sample_width']}位")
+            
+            # 标准化音频参数 (Whisper推荐参数)
+            audio_segment = audio_segment.set_frame_rate(16000)  # 16kHz
+            audio_segment = audio_segment.set_channels(1)        # 单声道
+            audio_segment = audio_segment.set_sample_width(2)    # 16位
+            
+            # 音量标准化 (归一化到-20dB)
+            audio_segment = audio_segment.normalize()
+            
+            # 导出标准化后的音频
+            output_buffer = io.BytesIO()
+            audio_segment.export(output_buffer, format="wav")
+            normalized_data = output_buffer.getvalue()
+            
+            log.info(f"音频标准化成功: {len(audio_data)} bytes → {len(normalized_data)} bytes")
+            
+            return normalized_data
             
         except Exception as e:
             log.error(f"音频标准化失败: {e}")

@@ -22,6 +22,7 @@ class RealtimeMessageHandler:
     def __init__(self):
         """初始化实时消息处理器"""
         self.chat_engine = None
+        self._initialized = False
         self._initialize_chat_engine()
         log.info("实时消息处理器初始化成功")
     
@@ -31,8 +32,9 @@ class RealtimeMessageHandler:
             self.chat_engine = get_current_engine()
             if self.chat_engine:
                 log.info("实时消息处理器聊天引擎初始化成功")
+                self._initialized = True
             else:
-                log.warning("聊天引擎未设置，将在首次使用时重试")
+                log.debug("聊天引擎未设置，将在首次使用时重试")
         except Exception as e:
             log.error(f"实时消息处理器聊天引擎初始化失败: {e}")
             self.chat_engine = None
@@ -87,7 +89,7 @@ class RealtimeMessageHandler:
         """
         try:
             # 如果引擎未初始化，尝试重新初始化
-            if not self.chat_engine:
+            if not self._initialized:
                 self._initialize_chat_engine()
                 if not self.chat_engine:
                     await self._send_error_response(client_id, "Chat engine not available")
@@ -169,8 +171,11 @@ class RealtimeMessageHandler:
                 "client_id": client_id
             })
             
-            # 如果启用了自动回复，继续处理文本
-            auto_reply = message.get("auto_reply", True)
+            # 如果启用了自动回复，继续处理文本（方案B默认关闭）
+            from config.config import get_config
+            config = get_config()
+            default_auto_reply = getattr(config, "STT_AUTO_REPLY_DEFAULT", False)
+            auto_reply = message.get("auto_reply", default_auto_reply)
             if auto_reply:
                 # 构建文本消息并处理
                 text_message = {

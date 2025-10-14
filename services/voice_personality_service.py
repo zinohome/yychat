@@ -3,6 +3,9 @@
 根据人格设置选择合适的语音类型
 """
 
+import json
+import os
+from datetime import datetime
 from typing import Dict, Optional
 from utils.log import log
 from core.personality_manager import PersonalityManager
@@ -14,12 +17,36 @@ class VoicePersonalityService:
     def __init__(self):
         """初始化语音个性化服务"""
         self.personality_manager = PersonalityManager()
-        self.voice_mapping = self._init_voice_mapping()
+        self.settings_file = "config/voice_settings.json"
+        self.voice_mapping = self._load_voice_settings()
         log.info("语音个性化服务初始化成功")
     
-    def _init_voice_mapping(self) -> Dict[str, str]:
+    def _load_voice_settings(self) -> Dict[str, str]:
         """
-        初始化人格到语音的映射
+        从配置文件加载语音设置
+        
+        Returns:
+            Dict[str, str]: 人格ID到语音类型的映射
+        """
+        try:
+            if os.path.exists(self.settings_file):
+                with open(self.settings_file, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+                    voice_settings = settings.get("voice_settings", {})
+                    log.info(f"从配置文件加载语音设置: {voice_settings}")
+                    return voice_settings
+            else:
+                # 创建默认配置文件
+                default_settings = self._get_default_voice_mapping()
+                self._save_voice_settings(default_settings)
+                return default_settings
+        except Exception as e:
+            log.error(f"加载语音设置失败: {e}")
+            return self._get_default_voice_mapping()
+    
+    def _get_default_voice_mapping(self) -> Dict[str, str]:
+        """
+        获取默认的人格到语音的映射
         
         Returns:
             Dict[str, str]: 人格ID到语音类型的映射
@@ -30,6 +57,31 @@ class VoicePersonalityService:
             "health_assistant": "alloy", # 中性、平衡的声音
             "default": "alloy"         # 默认语音
         }
+    
+    def _save_voice_settings(self, voice_mapping: Dict[str, str]):
+        """
+        保存语音设置到配置文件
+        
+        Args:
+            voice_mapping: 语音映射配置
+        """
+        try:
+            # 确保配置目录存在
+            os.makedirs(os.path.dirname(self.settings_file), exist_ok=True)
+            
+            settings = {
+                "voice_settings": voice_mapping,
+                "user_preferences": {},
+                "last_updated": datetime.now().isoformat() + "Z"
+            }
+            
+            with open(self.settings_file, 'w', encoding='utf-8') as f:
+                json.dump(settings, f, indent=2, ensure_ascii=False)
+            
+            log.info(f"语音设置已保存到: {self.settings_file}")
+            
+        except Exception as e:
+            log.error(f"保存语音设置失败: {e}")
     
     def get_voice_for_personality(self, personality_id: Optional[str]) -> str:
         """
@@ -46,7 +98,7 @@ class VoicePersonalityService:
                 return self.voice_mapping["default"]
             
             # 检查人格是否存在
-            personalities = self.personality_manager.get_personalities()
+            personalities = self.personality_manager.get_all_personalities()
             if personality_id not in personalities:
                 log.warning(f"未知的人格ID: {personality_id}，使用默认语音")
                 return self.voice_mapping["default"]
@@ -134,6 +186,10 @@ class VoicePersonalityService:
             
             # 更新映射
             self.voice_mapping[personality_id] = voice
+            
+            # 保存到配置文件
+            self._save_voice_settings(self.voice_mapping)
+            
             log.info(f"为人格 {personality_id} 设置语音: {voice}")
             return True
             

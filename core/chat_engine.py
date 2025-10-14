@@ -10,7 +10,7 @@ from core.personality_manager import PersonalityManager
 from services.tools.manager import ToolManager
 import httpx
 from services.tools.registry import tool_registry
-from services.mcp.manager import mcp_manager
+from services.mcp.manager import get_mcp_manager
 from services.mcp.exceptions import MCPServiceError, MCPServerNotFoundError, MCPToolNotFoundError
 # 新增模块导入
 from core.openai_client import AsyncOpenAIWrapper
@@ -53,15 +53,30 @@ class ChatEngine(BaseEngine):
         )
         # 包装为异步客户端
         self.client = AsyncOpenAIWrapper(self.sync_client)
-        self.chat_memory = ChatMemory()
-        self.async_chat_memory = get_async_chat_memory()
-        self.personality_manager = PersonalityManager()
-        self.tool_manager = ToolManager()
+        self.chat_memory = None
+        self.async_chat_memory = None
+        self.personality_manager = None
+        self.tool_manager = None
+        self._initialized = False
+    
+    def _ensure_initialized(self):
+        """确保组件已初始化（延迟初始化）"""
+        if not self._initialized:
+            log.info("ChatEngine: 开始延迟初始化组件...")
+            self.chat_memory = ChatMemory()
+            self.async_chat_memory = get_async_chat_memory()
+            self.personality_manager = PersonalityManager()
+            self.tool_manager = ToolManager()
+            self._initialized = True
+            log.info("ChatEngine: 延迟初始化完成")
        
     # 在generate_response方法中添加性能监控
     async def generate_response(self, messages: List[Dict[str, str]], conversation_id: str = "default", 
                                personality_id: Optional[str] = None, use_tools: Optional[bool] = None, 
                                stream: Optional[bool] = None) -> Any:
+        # 确保组件已初始化
+        self._ensure_initialized()
+        
         # 记录总请求处理开始时间
         total_start_time = time.time()
         
@@ -108,6 +123,9 @@ class ChatEngine(BaseEngine):
             
             # 创建messages的深拷贝，避免修改原始列表
             messages_copy = [msg.copy() for msg in messages]
+            # 若历史过长，仅保留最后3条，减少请求体体积
+            if len(messages_copy) > 3:
+                messages_copy = messages_copy[-3:]
             
             log.debug(f"原始消息: {messages_copy}")
             
@@ -295,7 +313,7 @@ class ChatEngine(BaseEngine):
                     first_chunk_time = time.time()
                     log.debug(f"流式响应首字节时间: {first_chunk_time - total_start_time:.2f}秒")
                 
-                log.debug(f"流式响应chunk {chunk_count}: {chunk}")
+                #log.debug(f"流式响应chunk {chunk_count}: {chunk}")
                 yield chunk
                 
         except Exception as e:
@@ -603,7 +621,7 @@ class ChatEngine(BaseEngine):
             log.info(f"Calling MCP service: {tool_name}, params: {params}, server: {mcp_server or 'auto'}")
             
             # 使用MCP管理器调用服务，支持指定服务器
-            result = mcp_manager.call_tool(tool_name, params, mcp_server)
+            result = get_mcp_manager().call_tool(tool_name, params, mcp_server)
             
             # 更灵活的结果处理
             processed_result = []

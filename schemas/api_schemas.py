@@ -23,6 +23,10 @@ class ChatCompletionRequest(BaseModel):
     conversation_id: Optional[str] = Field(default=None, description="会话ID")
     personality_id: Optional[str] = Field(default=None, description="人格ID")
     use_tools: bool = Field(default=True, description="是否使用工具")
+    # 语音联动相关（可选，向后兼容）
+    enable_voice: Optional[bool] = Field(default=False, description="是否同时触发TTS，通过WS返回音频")
+    message_id: Optional[str] = Field(default=None, description="本次生成消息的唯一ID（用于TTS对齐）")
+    client_id: Optional[str] = Field(default=None, description="前端WS连接的client_id（用于定向推送TTS音频）")
 
 # 聊天完成响应选择模型
 class ChatCompletionResponseChoice(BaseModel):

@@ -10,6 +10,7 @@ from typing import Optional, Dict, Any
 from openai import OpenAI
 from utils.log import log
 from config.config import get_config
+from utils.audio_utils import AudioUtils
 
 config = get_config()
 
@@ -49,7 +50,24 @@ class AudioService:
             # 检查音频大小限制 (25MB for OpenAI)
             max_size = 25 * 1024 * 1024  # 25MB
             if len(audio_data) > max_size:
-                raise ValueError(f"音频文件过大，最大支持 {max_size / (1024*1024):.1f}MB")
+                # 尝试压缩音频
+                log.info(f"音频文件过大 ({len(audio_data) / (1024*1024):.1f}MB)，尝试压缩")
+                audio_data = AudioUtils.compress_audio(audio_data, quality=70)
+                
+                # 再次检查大小
+                if len(audio_data) > max_size:
+                    raise ValueError(f"音频文件过大，最大支持 {max_size / (1024*1024):.1f}MB")
+            
+            # 音频预处理
+            log.info("开始音频预处理...")
+            
+            # 1. 标准化音频格式
+            audio_data = AudioUtils.normalize_audio(audio_data)
+            
+            # 2. 转换为WAV格式 (Whisper推荐)
+            audio_data = AudioUtils.convert_audio_format(audio_data, "wav")
+            
+            log.info("音频预处理完成")
             
             # 创建音频文件对象
             audio_file = io.BytesIO(audio_data)
@@ -137,6 +155,43 @@ class AudioService:
         except Exception as e:
             log.error(f"文本转语音失败: {e}")
             raise
+
+    def text_to_speech(self, text: str, voice: str = "alloy", 
+                        model: str = "tts-1", speed: float = 1.0) -> bytes:
+        """
+        同步封装：文本转语音（返回原始音频bytes）
+        与 OpenAI 官方 TTS 指南保持一致，便于在非异步环境复用。
+        """
+        # 参数校验与缓存逻辑与异步实现保持一致（此处走直连不使用异步缓存）
+        if not text or not text.strip():
+            raise ValueError("文本内容不能为空")
+        if len(text) > 4096:
+            raise ValueError("文本长度不能超过4096个字符")
+        if speed < 0.25 or speed > 4.0:
+            raise ValueError("语速必须在0.25-4.0之间")
+
+        try:
+            start_time = time.time()
+            response = self.openai_client.audio.speech.create(
+                model=model,
+                voice=voice,
+                input=text,
+                speed=speed
+            )
+            processing_time = time.time() - start_time
+            audio_data = response.content
+            log.info(f"文本转语音(同步)完成，耗时: {processing_time:.2f}s，音频大小: {len(audio_data)} bytes")
+            return audio_data
+        except Exception as e:
+            log.error(f"文本转语音(同步)失败: {e}")
+            raise
+
+    async def text_to_speech_async(self, text: str, voice: str = "alloy", 
+                                   model: str = "tts-1", speed: float = 1.0) -> bytes:
+        """
+        异步封装：调用内部 synthesize_speech，返回原始音频bytes。
+        """
+        return await self.synthesize_speech(text=text, voice=voice, model=model, speed=speed)
     
     async def transcribe_audio_base64(self, audio_base64: str, model: str = "whisper-1") -> str:
         """

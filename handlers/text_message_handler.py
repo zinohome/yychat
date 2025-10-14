@@ -7,6 +7,7 @@ import json
 import time
 from typing import Dict, Any, Optional
 from utils.log import log
+from config.config import get_config
 from core.websocket_manager import websocket_manager
 from core.chat_engine import ChatEngine
 from core.engine_manager import get_current_engine
@@ -18,7 +19,8 @@ class TextMessageHandler:
     
     def __init__(self):
         self.chat_engine = None
-        self._initialize_chat_engine()
+        self._initialized = False
+        log.info("文本消息处理器创建完成（延迟初始化）")
     
     def _initialize_chat_engine(self):
         """初始化聊天引擎"""
@@ -26,8 +28,9 @@ class TextMessageHandler:
             self.chat_engine = get_current_engine()
             if self.chat_engine:
                 log.info("文本消息处理器初始化成功")
+                self._initialized = True
             else:
-                log.warning("聊天引擎未设置，将在首次使用时重试")
+                log.debug("聊天引擎未设置，将在首次使用时重试")
         except Exception as e:
             log.error(f"文本消息处理器初始化失败: {e}")
             self.chat_engine = None
@@ -45,7 +48,7 @@ class TextMessageHandler:
         """
         try:
             # 如果引擎未初始化，尝试重新初始化
-            if not self.chat_engine:
+            if not self._initialized:
                 self._initialize_chat_engine()
                 if not self.chat_engine:
                     await self._send_error_response(client_id, "Chat engine not available")
@@ -149,12 +152,15 @@ class TextMessageHandler:
             chat_request: 聊天请求
         """
         try:
-            # 发送流式响应开始消息
-            await websocket_manager.send_message(client_id, {
-                "type": "stream_start",
-                "timestamp": time.time(),
-                "client_id": client_id
-            })
+            # 根据配置决定是否通过WS发送文本流事件（方案B默认关闭）
+            config = get_config()
+            ws_text_enabled = getattr(config, "VOICE_DISABLE_WS_TEXT", True) is False
+            if ws_text_enabled:
+                await websocket_manager.send_message(client_id, {
+                    "type": "stream_start",
+                    "timestamp": time.time(),
+                    "client_id": client_id
+                })
             
             # 获取流式响应
             response_stream = await self.chat_engine.generate_response(
@@ -170,22 +176,23 @@ class TextMessageHandler:
                 if isinstance(chunk, dict) and "content" in chunk:
                     content = chunk["content"]
                     full_content += content
-                    
-                    # 发送内容块
-                    await websocket_manager.send_message(client_id, {
-                        "type": "stream_chunk",
-                        "content": content,
-                        "timestamp": time.time(),
-                        "client_id": client_id
-                    })
+                    if ws_text_enabled:
+                        # 发送内容块（仅在允许WS文本时）
+                        await websocket_manager.send_message(client_id, {
+                            "type": "stream_chunk",
+                            "content": content,
+                            "timestamp": time.time(),
+                            "client_id": client_id
+                        })
             
-            # 发送流式响应结束消息
-            await websocket_manager.send_message(client_id, {
-                "type": "stream_end",
-                "full_content": full_content,
-                "timestamp": time.time(),
-                "client_id": client_id
-            })
+            if ws_text_enabled:
+                # 发送流式响应结束消息
+                await websocket_manager.send_message(client_id, {
+                    "type": "stream_end",
+                    "full_content": full_content,
+                    "timestamp": time.time(),
+                    "client_id": client_id
+                })
             
         except Exception as e:
             log.error(f"流式响应处理失败: {client_id}, 错误: {e}")
@@ -209,14 +216,16 @@ class TextMessageHandler:
                 stream=False
             )
             
-            # 发送完整响应
-            await websocket_manager.send_message(client_id, {
-                "type": "text_response",
-                "content": response.get("content", ""),
-                "conversation_id": chat_request.conversation_id,
-                "timestamp": time.time(),
-                "client_id": client_id
-            })
+            # 非流式文本通过WS返回也受同一开关控制（默认关闭）
+            config = get_config()
+            if getattr(config, "VOICE_DISABLE_WS_TEXT", True) is False:
+                await websocket_manager.send_message(client_id, {
+                    "type": "text_response",
+                    "content": response.get("content", ""),
+                    "conversation_id": chat_request.conversation_id,
+                    "timestamp": time.time(),
+                    "client_id": client_id
+                })
             
         except Exception as e:
             log.error(f"非流式响应处理失败: {client_id}, 错误: {e}")

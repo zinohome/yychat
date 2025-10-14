@@ -159,11 +159,17 @@ class WebSocketManager:
                 log.error(f"消息过大: {len(message_str)} bytes")
                 return False
             
+            # 发送前输出结构化日志，便于排查串音
+            msg_type = message.get("type", "unknown")
+            session_id = message.get("session_id") or message.get("conversation_id")
+            message_id = message.get("message_id")
+            log.debug(
+                f"WS下行 | type={msg_type} client_id={client_id} session_id={session_id} message_id={message_id}"
+            )
+
             # 发送消息
             await connection_info.websocket.send_text(message_str)
             connection_info.increment_message_count()
-            
-            log.debug(f"消息已发送到 {client_id}: {message.get('type', 'unknown')}")
             return True
             
         except WebSocketDisconnect:

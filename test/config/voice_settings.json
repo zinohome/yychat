@@ -1,0 +1,10 @@
+{
+  "voice_settings": {
+    "friendly": "echo",
+    "professional": "onyx",
+    "health_assistant": "alloy",
+    "default": "alloy"
+  },
+  "user_preferences": {},
+  "last_updated": "2025-10-13T10:10:55.295748Z"
+}

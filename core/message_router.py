@@ -196,35 +196,25 @@ async def handle_get_status(client_id: str, message: dict):
     })
 
 
-# 注册基础处理器
-message_router.register_handler("heartbeat", handle_heartbeat)
-message_router.register_handler("ping", handle_ping)
-message_router.register_handler("get_status", handle_get_status)
+# 注意：消息处理器注册已移至app.py的lifespan事件中，避免重复注册
 
-# 注册文本消息处理器
-from handlers.text_message_handler import handle_text_message
-message_router.register_handler("text_message", handle_text_message)
-
-# 注册实时消息处理器
-from core.realtime_handler import realtime_handler
-
+# 导出处理器函数供lifespan使用
 async def handle_audio_input(client_id: str, message: dict):
     """处理音频输入消息"""
+    from core.realtime_handler import realtime_handler
     return await realtime_handler.handle_message(client_id, message)
 
 async def handle_audio_stream(client_id: str, message: dict):
     """处理音频流消息"""
+    from core.realtime_handler import realtime_handler
     return await realtime_handler.handle_message(client_id, message)
 
 async def handle_voice_command(client_id: str, message: dict):
     """处理语音命令消息"""
+    from core.realtime_handler import realtime_handler
     return await realtime_handler.handle_message(client_id, message)
 
 async def handle_status_query(client_id: str, message: dict):
     """处理状态查询消息"""
+    from core.realtime_handler import realtime_handler
     return await realtime_handler.handle_message(client_id, message)
-
-message_router.register_handler("audio_input", handle_audio_input)
-message_router.register_handler("audio_stream", handle_audio_stream)
-message_router.register_handler("voice_command", handle_voice_command)
-message_router.register_handler("status_query", handle_status_query)

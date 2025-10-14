@@ -1,0 +1,10 @@
+{
+  "voice_settings": {
+    "friendly": "nova",
+    "professional": "onyx",
+    "health_assistant": "nova",
+    "default": "alloy"
+  },
+  "user_preferences": {},
+  "last_updated": "2025-10-13T10:33:11.399926Z"
+}

@@ -1,4 +1,5 @@
 import json
+import base64
 import asyncio
 import uuid
 import io
@@ -21,7 +22,7 @@ from services.tools.registry import tool_registry
 from services.tools.discovery import ToolDiscoverer
 from services.mcp.discovery import discover_and_register_mcp_tools
 # 添加mcp_manager导入用于列出MCP工具
-from services.mcp.manager import mcp_manager
+from services.mcp.manager import get_mcp_manager
 # 添加ToolManager导入用于工具调用
 from services.tools.manager import ToolManager
 # 添加引擎管理器导入
@@ -30,9 +31,9 @@ from core.chat_engine import ChatEngine
 # 添加WebSocket相关导入
 from core.websocket_manager import websocket_manager
 from core.message_router import message_router
-# 添加音频服务导入
-from services.audio_service import audio_service
-from services.voice_personality_service import voice_personality_service
+# 添加音频服务导入（延迟初始化）
+from services.audio_service import AudioService
+from services.voice_personality_service import VoicePersonalityService
 from utils.audio_utils import AudioUtils
 
 # 导入Pydantic模型
@@ -55,20 +56,12 @@ config = get_config()
 # 使用引擎管理器（统一入口）
 engine_manager = get_engine_manager()
 
-# 根据配置选择使用的聊天引擎
-if config.CHAT_ENGINE == "mem0_proxy":
-    from core.mem0_proxy import get_mem0_proxy
-    # 初始化Mem0代理引擎（单例）
-    mem0_engine = get_mem0_proxy()
-    engine_manager.register_engine("mem0_proxy", mem0_engine)
-    log.info("✅ Mem0 Proxy engine registered")
-    chat_engine = mem0_engine  # 保持向后兼容
-else:
-    # 默认使用chat_engine
-    chat_engine_instance = ChatEngine()
-    engine_manager.register_engine("chat_engine", chat_engine_instance)
-    log.info("✅ Chat Engine registered")
-    chat_engine = chat_engine_instance  # 保持向后兼容
+# 全局变量，在lifespan中初始化
+chat_engine = None
+personality_manager = None
+tool_manager = None
+audio_service = None
+voice_personality_service = None
 
 # 创建HTTPBearer安全方案
 bearer_scheme = HTTPBearer()
@@ -95,13 +88,105 @@ app = FastAPI(
     }
 )
 
+# 添加lifespan事件处理器
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """应用生命周期管理"""
+    global chat_engine, personality_manager, tool_manager, audio_service, voice_personality_service
+    
+    # 启动时初始化
+    log.info("🚀 开始应用初始化...")
+    
+    try:
+        # 根据配置选择使用的聊天引擎
+        if config.CHAT_ENGINE == "mem0_proxy":
+            from core.mem0_proxy import get_mem0_proxy
+            # 初始化Mem0代理引擎（单例）
+            mem0_engine = get_mem0_proxy()
+            engine_manager.register_engine("mem0_proxy", mem0_engine)
+            # 直接设置当前引擎名称
+            engine_manager.current_engine_name = "mem0_proxy"
+            log.info("✅ Mem0 Proxy engine registered and set as current")
+            chat_engine = mem0_engine  # 保持向后兼容
+        else:
+            # 默认使用chat_engine
+            chat_engine_instance = ChatEngine()
+            # 强制初始化所有组件，避免第一次请求时的延迟
+            log.info("🚀 开始初始化ChatEngine组件...")
+            chat_engine_instance._ensure_initialized()
+            log.info("✅ ChatEngine组件初始化完成")
+            
+            engine_manager.register_engine("chat_engine", chat_engine_instance)
+            # 直接设置当前引擎名称
+            engine_manager.current_engine_name = "chat_engine"
+            log.info("✅ Chat Engine registered and set as current")
+            chat_engine = chat_engine_instance  # 保持向后兼容
+        
+        # 自动发现并注册所有工具
+        registered_count = ToolDiscoverer.register_discovered_tools()
+        log.debug(f"自动注册了 {registered_count} 个工具")
+        
+        # 初始化性能监控
+        if config.ENABLE_PERFORMANCE_MONITOR:
+            log.info(f"✅ 性能监控已启用 (采样率: {config.PERFORMANCE_SAMPLING_RATE*100:.0f}%, 历史记录: {config.PERFORMANCE_MAX_HISTORY}条)")
+            # 设置监控器的最大历史记录数
+            performance_monitor._max_history = config.PERFORMANCE_MAX_HISTORY
+        else:
+            log.info("⚪ 性能监控已禁用")
+        
+        # 初始化并注册MCP工具
+        try:
+            discover_and_register_mcp_tools()
+        except Exception as e:
+            log.error(f"Failed to initialize MCP tools: {str(e)}")
+        
+        # 初始化人格管理器和工具管理器
+        personality_manager = PersonalityManager()
+        tool_manager = ToolManager()
+        log.info("✅ 人格管理器和工具管理器初始化完成")
+        
+        # 初始化音频服务
+        audio_service = AudioService()
+        voice_personality_service = VoicePersonalityService()
+        log.info("✅ 音频服务初始化完成")
+        
+        # 注册消息处理器（延迟注册，避免重复）
+        from handlers.text_message_handler import handle_text_message
+        from core.message_router import handle_heartbeat, handle_ping, handle_get_status, handle_audio_input, handle_audio_stream, handle_voice_command, handle_status_query
+        
+        # 重新注册所有处理器
+        message_router.register_handler("heartbeat", handle_heartbeat)
+        message_router.register_handler("ping", handle_ping)
+        message_router.register_handler("get_status", handle_get_status)
+        message_router.register_handler("text_message", handle_text_message)
+        message_router.register_handler("audio_input", handle_audio_input)
+        message_router.register_handler("audio_stream", handle_audio_stream)
+        message_router.register_handler("voice_command", handle_voice_command)
+        message_router.register_handler("status_query", handle_status_query)
+        log.info("✅ 消息处理器重新注册完成")
+        
+        log.info("✅ 应用初始化完成")
+        
+    except Exception as e:
+        log.error(f"❌ 应用初始化失败: {e}")
+        raise
+    
+    yield
+    
+    # 关闭时清理
+    log.info("🔄 应用正在关闭...")
+    # 这里可以添加清理逻辑
+    log.info("✅ 应用已关闭")
+
+# 设置lifespan
+app.router.lifespan_context = lifespan
+
 # 挂载静态文件目录
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# 初始化人格管理器
-personality_manager = PersonalityManager()
-# 初始化工具管理器
-tool_manager = ToolManager()
+# 注意：人格管理器和工具管理器已在lifespan中初始化
 
 # 认证依赖函数 - 更新为使用HTTPBearer
 def verify_api_key(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)):
@@ -125,27 +210,7 @@ def verify_api_key(credentials: HTTPAuthorizationCredentials = Depends(bearer_sc
     
     return api_key
 
-# 在应用初始化时自动注册所有工具
-@app.on_event("startup")
-async def startup_event():
-    """应用启动时执行的初始化操作"""
-    # 自动发现并注册所有工具
-    registered_count = ToolDiscoverer.register_discovered_tools()
-    log.debug(f"自动注册了 {registered_count} 个工具")
-    
-    # 初始化性能监控
-    if config.ENABLE_PERFORMANCE_MONITOR:
-        log.info(f"✅ 性能监控已启用 (采样率: {config.PERFORMANCE_SAMPLING_RATE*100:.0f}%, 历史记录: {config.PERFORMANCE_MAX_HISTORY}条)")
-        # 设置监控器的最大历史记录数
-        performance_monitor._max_history = config.PERFORMANCE_MAX_HISTORY
-    else:
-        log.info("⚪ 性能监控已禁用")
-    
-    # 初始化并注册MCP工具
-    try:
-        discover_and_register_mcp_tools()
-    except Exception as e:
-        log.error(f"Failed to initialize MCP tools: {str(e)}")
+# 注意：startup事件已移至lifespan处理器中
 
 # 自定义异常处理
 @app.exception_handler(Exception)
@@ -184,6 +249,21 @@ async def create_chat_completion(request: ChatCompletionRequest, api_key: str = 
             # 流式响应处理
             async def stream_generator():
                 try:
+                    # 组装一致性三元组
+                    session_id = conversation_id
+                    message_id = request.message_id or f"msg-{uuid.uuid4().hex[:8]}"
+                    enable_voice = bool(getattr(request, "enable_voice", False))
+                    client_id = getattr(request, "client_id", None)
+
+                    # 发出stream_start元事件（向后兼容：作为单独SSE事件，不改变原chunk结构）
+                    log.debug(f"SSE stream_start: session_id={session_id}, message_id={message_id}, enable_voice={enable_voice}, client_id={client_id}")
+                    start_meta = {
+                        "type": "stream_start",
+                        "message_id": message_id,
+                        "session_id": session_id
+                    }
+                    yield f"data: {json.dumps(start_meta)}\n\n"
+
                     generator = await chat_engine.generate_response(
                         request.messages,
                         conversation_id,
@@ -206,6 +286,7 @@ async def create_chat_completion(request: ChatCompletionRequest, api_key: str = 
                     return
                 
                 try:
+                    full_content_parts = []
                     async for chunk in generator:
                         if chunk.get("stream", False):
                             response_data = {
@@ -213,9 +294,14 @@ async def create_chat_completion(request: ChatCompletionRequest, api_key: str = 
                                 "object": "chat.completion.chunk",
                                 "created": int(asyncio.get_event_loop().time()),
                                 "model": request.model,
-                                "choices": [{"index": 0, "delta": {"content": chunk["content"]}, "finish_reason": chunk["finish_reason"]}]
+                                "choices": [{"index": 0, "delta": {"content": chunk["content"]}, "finish_reason": chunk["finish_reason"]}],
+                                # 附加meta（前端可选读取，向后兼容）
+                                "meta": {"message_id": message_id, "session_id": session_id}
                             }
                             yield f"data: {json.dumps(response_data)}\n\n"
+                            # 累积文本用于简版TTS
+                            if isinstance(chunk.get("content"), str):
+                                full_content_parts.append(chunk["content"])
                             if chunk["finish_reason"] is not None:
                                 break
                 except Exception as iter_err:
@@ -230,6 +316,62 @@ async def create_chat_completion(request: ChatCompletionRequest, api_key: str = 
                     }
                     yield f"data: {json.dumps(error_data)}\n\n"
                     yield 'data: [DONE]\n\n'
+                    return
+
+                # 发送stream_end元事件
+                try:
+                    full_content = "".join(full_content_parts)
+                    end_meta = {
+                        "type": "stream_end",
+                        "message_id": message_id,
+                        "session_id": session_id,
+                        "full_length": len(full_content)
+                    }
+                    yield f"data: {json.dumps(end_meta)}\n\n"
+                    log.debug(f"SSE stream_end: session_id={session_id}, message_id={message_id}, full_length={len(full_content)}")
+                except Exception as end_err:
+                    log.warning(f"emit stream_end meta failed: {end_err}")
+
+                # 简版TTS：SSE完成后，如果enable_voice=true且提供client_id，则一次性合成并经WS回传
+                if enable_voice and client_id:
+                    try:
+                        # 为保证不阻塞SSE返回，这里异步触发WS推送
+                        async def _tts_and_push():
+                            try:
+                                if not full_content_parts:
+                                    log.debug("TTS skipped: empty content")
+                                    return
+                                text_to_speak = "".join(full_content_parts)
+                                log.info(f"TTS scheduling: len={len(text_to_speak)}, session_id={session_id}, message_id={message_id}, client_id={client_id}")
+                                # 使用统一封装方法，优先异步
+                                tts_bytes = await audio_service.text_to_speech_async(text_to_speak)
+                                audio_bytes = tts_bytes or b""
+                                if not audio_bytes:
+                                    log.warning("TTS produced empty audio bytes")
+                                # 通过WS定向发送
+                                await websocket_manager.send_message(client_id, {
+                                    "type": "voice_response",
+                                    "client_id": client_id,
+                                    "session_id": session_id,
+                                    "message_id": message_id,
+                                    "audio": base64.b64encode(audio_bytes).decode("utf-8")
+                                })
+                                # 结束标记
+                                await websocket_manager.send_message(client_id, {
+                                    "type": "synthesis_complete",
+                                    "client_id": client_id,
+                                    "session_id": session_id,
+                                    "message_id": message_id
+                                })
+                                log.info(f"TTS sent over WS: session_id={session_id}, message_id={message_id}, client_id={client_id}, bytes={len(audio_bytes)}")
+                            except Exception as tts_err:
+                                log.error(f"TTS dispatch failed: {tts_err}", exc_info=True)
+
+                        asyncio.create_task(_tts_and_push())
+                    except Exception as disp_err:
+                        log.error(f"schedule TTS failed: {disp_err}", exc_info=True)
+                elif enable_voice and not client_id:
+                    log.warning(f"enable_voice=true but missing client_id; skip TTS. session_id={session_id}, message_id={message_id}")
             
             return StreamingResponse(stream_generator(), media_type="text/event-stream")
         else:

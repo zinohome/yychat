@@ -24,3 +24,5 @@ hiredis>=2.2.3
 # WebSocket dependencies for voice agents
 websockets>=11.0.3
 python-multipart>=0.0.6
+# Audio processing dependencies
+pydub>=0.25.1
