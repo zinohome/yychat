@@ -89,20 +89,60 @@ class MCPManager:
                 
                 # 检查是否存在带前缀的同名工具
                 if prefixed_tool_name in self._clients._tool_actions:
+                    log.info(f"MCP dispatch: server={mcp_server}, tool={prefixed_tool_name}, args={arguments}")
                     return self._clients.execute_tool(prefixed_tool_name, arguments)
                 # 尝试直接使用原始工具名
                 elif tool_name in self._clients._tool_actions:
+                    log.info(f"MCP dispatch: server={mcp_server}, tool={tool_name}, args={arguments}")
                     return self._clients.execute_tool(tool_name, arguments)
                 else:
                     raise MCPToolNotFoundError(f"MCP tool '{tool_name}' not found on server '{mcp_server}'")
             
-            # 自动选择服务器调用
+            # 优先按固定偏好服务器调用（针对已知稳定服务），避免不必要的路由变更
+            # 当前仅对 maps_weather 固定到 amap-amap-sse，如存在
+            if tool_name == "maps_weather" and hasattr(self._clients, "_tool_actions"):
+                preferred_server = "amap-amap-sse"
+                preferred_registered = f"{preferred_server}__{tool_name}"
+                if preferred_registered in self._clients._tool_actions:
+                    try:
+                        log.info(f"MCP dispatch: server={preferred_server}, tool={preferred_registered}, args={arguments}")
+                        return self._clients.execute_tool(preferred_registered, arguments)
+                    except Exception as e:
+                        log.warning(f"Preferred server '{preferred_server}' failed for {tool_name}: {e}")
+                        # 继续走默认逻辑
+
+            # 自动选择服务器调用（按已注册的工具映射）
+            log.info(f"MCP dispatch: server=auto, tool={tool_name}, args={arguments}")
             return self._clients.execute_tool(tool_name, arguments)
         except MCPToolNotFoundError:
             raise
         except Exception as e:
-            log.error(f"Failed to call MCP tool: {str(e)}")
-            raise MCPServiceError(f"Failed to call MCP tool: {str(e)}")
+            # 对 5xx（如 502）执行一次快速重试，并在重试前重建客户端以刷新会话/连接
+            error_text = str(e)
+            log.error(f"Failed to call MCP tool: {error_text}")
+            should_retry = (" 502 " in error_text) or ("502 Bad Gateway" in error_text) or ("HTTPStatusError" in error_text)
+            if should_retry:
+                try:
+                    log.warning("MCP call received 5xx, reinitializing clients and retrying once...")
+                    # 重建客户端（刷新会话/连接）
+                    self._clients = None
+                    self._initialize()
+                    # 重试同样调用路径
+                    if mcp_server:
+                        log.info(f"MCP retry dispatch: server={mcp_server}, tool={tool_name}, args={arguments}")
+                        return self.call_tool(tool_name, arguments, mcp_server=mcp_server)
+                    if tool_name == "maps_weather" and hasattr(self._clients, "_tool_actions"):
+                        preferred_server = "amap-amap-sse"
+                        preferred_registered = f"{preferred_server}__{tool_name}"
+                        if preferred_registered in self._clients._tool_actions:
+                            log.info(f"MCP retry dispatch: server={preferred_server}, tool={preferred_registered}, args={arguments}")
+                            return self._clients.execute_tool(preferred_registered, arguments)
+                    log.info(f"MCP retry dispatch: server=auto, tool={tool_name}, args={arguments}")
+                    return self._clients.execute_tool(tool_name, arguments)
+                except Exception as e2:
+                    log.error(f"Retry MCP tool call failed: {e2}")
+                    raise MCPServiceError(f"Failed to call MCP tool: {e2}")
+            raise MCPServiceError(f"Failed to call MCP tool: {error_text}")
     
     def close(self):
         """关闭所有MCP客户端连接"""

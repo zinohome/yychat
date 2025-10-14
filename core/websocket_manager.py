@@ -112,20 +112,28 @@ class WebSocketManager:
         """
         if client_id in self.active_connections:
             connection_info = self.active_connections[client_id]
+            
+            # 标记连接为不活跃，避免重复处理
+            connection_info.is_active = False
+            
             try:
-                # 发送断开连接消息
+                # 尝试发送断开连接消息（如果连接仍然可用）
                 await self.send_message(client_id, {
                     "type": "connection_closed",
                     "client_id": client_id,
                     "timestamp": time.time(),
                     "message": "连接已关闭"
                 })
-                
-                # 关闭WebSocket连接
-                await connection_info.websocket.close()
-                
             except Exception as e:
-                log.warning(f"关闭WebSocket连接时出错: {client_id}, 错误: {e}")
+                # 连接可能已经关闭，这是正常的
+                log.debug(f"发送断开连接消息失败（连接可能已关闭）: {client_id}, 错误: {e}")
+            
+            try:
+                # 尝试关闭WebSocket连接
+                await connection_info.websocket.close()
+            except Exception as e:
+                # 连接可能已经关闭，这是正常的
+                log.debug(f"关闭WebSocket连接时出错（连接可能已关闭）: {client_id}, 错误: {e}")
             
             finally:
                 # 清理连接信息
@@ -146,11 +154,17 @@ class WebSocketManager:
         Returns:
             bool: 发送是否成功
         """
+        # 首先检查客户端是否存在
         if client_id not in self.active_connections:
             log.warning(f"客户端不存在: {client_id}")
             return False
         
         connection_info = self.active_connections[client_id]
+        
+        # 检查连接是否仍然活跃
+        if not connection_info.is_active:
+            log.warning(f"客户端连接已不活跃: {client_id}")
+            return False
         
         try:
             # 检查消息大小
@@ -174,10 +188,15 @@ class WebSocketManager:
             
         except WebSocketDisconnect:
             log.info(f"客户端已断开连接: {client_id}")
+            # 标记连接为不活跃，避免重复处理
+            connection_info.is_active = False
             await self.disconnect(client_id)
             return False
         except Exception as e:
             log.error(f"发送消息失败: {client_id}, 错误: {e}")
+            # 对于某些错误，标记连接为不活跃
+            if "close message has been sent" in str(e) or "not connected" in str(e):
+                connection_info.is_active = False
             return False
     
     async def broadcast_message(self, message: dict, exclude: List[str] = None) -> int:
@@ -248,6 +267,22 @@ class WebSocketManager:
             ConnectionInfo: 连接信息对象
         """
         return self.active_connections.get(client_id)
+    
+    def is_connection_active(self, client_id: str) -> bool:
+        """
+        检查连接是否活跃
+        
+        Args:
+            client_id: 客户端ID
+            
+        Returns:
+            bool: 连接是否活跃
+        """
+        if client_id not in self.active_connections:
+            return False
+        
+        connection_info = self.active_connections[client_id]
+        return connection_info.is_active
     
     def get_connection_count(self) -> int:
         """

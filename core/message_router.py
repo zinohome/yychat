@@ -52,9 +52,21 @@ class MessageRouter:
             bool: 处理是否成功
         """
         try:
+            # 首先检查连接是否仍然活跃
+            if not websocket_manager.is_connection_active(client_id):
+                log.warning(f"客户端连接已不活跃，跳过消息处理: {client_id}")
+                return False
+            
             # 验证消息格式
             if not self._validate_message(message):
                 await self._send_error_response(client_id, "Invalid message format")
+                return False
+            
+            # 防串台验证：检查消息中的client_id是否匹配
+            message_client_id = message.get("client_id")
+            if message_client_id and message_client_id != client_id:
+                log.warning(f"消息client_id不匹配: 消息中={message_client_id}, 连接中={client_id}")
+                await self._send_error_response(client_id, "Client ID mismatch")
                 return False
             
             message_type = message.get("type")
@@ -95,7 +107,7 @@ class MessageRouter:
     
     def _validate_message(self, message: dict) -> bool:
         """
-        验证消息格式
+        验证消息格式和防串台机制
         
         Args:
             message: 消息内容
@@ -117,6 +129,18 @@ class MessageRouter:
         if not isinstance(message_type, str) or not message_type.strip():
             return False
         
+        # 防串台验证：检查client_id
+        client_id = message.get("client_id")
+        if client_id and not isinstance(client_id, str):
+            log.warning(f"无效的client_id类型: {type(client_id)}")
+            return False
+        
+        # 防串台验证：检查session_id
+        session_id = message.get("session_id")
+        if session_id and not isinstance(session_id, str):
+            log.warning(f"无效的session_id类型: {type(session_id)}")
+            return False
+        
         return True
     
     async def _send_error_response(self, client_id: str, error_message: str):
@@ -127,6 +151,11 @@ class MessageRouter:
             client_id: 客户端ID
             error_message: 错误消息
         """
+        # 检查连接是否仍然活跃
+        if not websocket_manager.is_connection_active(client_id):
+            log.warning(f"客户端连接已不活跃，跳过错误响应发送: {client_id}")
+            return
+        
         error_response = {
             "type": "error",
             "error": {
@@ -137,7 +166,10 @@ class MessageRouter:
             "timestamp": __import__("time").time()
         }
         
-        await websocket_manager.send_message(client_id, error_response)
+        try:
+            await websocket_manager.send_message(client_id, error_response)
+        except Exception as e:
+            log.warning(f"发送错误响应失败: {client_id}, 错误: {e}")
     
     def get_registered_handlers(self) -> Dict[str, str]:
         """

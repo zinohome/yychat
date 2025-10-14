@@ -2,12 +2,22 @@ from typing import List, Dict, Any, Optional
 
 
 TIME_TOOL_NAME = "gettime"
+WEATHER_TOOL_NAME = "maps_weather"
 
 TIME_KEYWORDS = [
     # 中文
-    "几点", "时间", "现在", "几点钟", "时刻", "日期", "今天", "当前时间",
+    "几点", "时间", "现在", "几点钟", "时刻", "日期", "当前时间",
     # 英文
-    "time", "what time", "current time", "date", "today", "now",
+    "time", "what time", "current time", "date", "now",
+]
+
+WEATHER_KEYWORDS = [
+    # 中文
+    "天气", "温度", "下雨", "晴天", "阴天", "多云", "雨", "雪", "风", "湿度", "气压",
+    "天气预报", "气温", "降雨", "降雪", "刮风", "雾霾", "空气质量",
+    # 英文
+    "weather", "temperature", "rain", "sunny", "cloudy", "snow", "wind", "humidity", "pressure",
+    "forecast", "climate", "precipitation", "storm", "fog", "air quality"
 ]
 
 
@@ -35,6 +45,21 @@ def select_tool_choice(last_message: str,
     if not last_message:
         return None
     msg = last_message.lower()
+    
+    # 优先检查天气关键词（天气查询优先级更高）
+    if any(k in msg for k in WEATHER_KEYWORDS):
+        # 只有当没有限制或者 maps_weather 在允许列表中时才强制使用
+        if not allowed_tool_names:
+            # 没有限制，可以使用
+            return {"type": "function", "function": {"name": WEATHER_TOOL_NAME}}
+        elif WEATHER_TOOL_NAME in allowed_tool_names:
+            # maps_weather 在允许列表中，可以使用
+            return {"type": "function", "function": {"name": WEATHER_TOOL_NAME}}
+        else:
+            # maps_weather 不在允许列表中，不强制使用（让模型自由选择或不用工具）
+            return None
+    
+    # 然后检查时间关键词
     if any(k in msg for k in TIME_KEYWORDS):
         # 只有当没有限制或者 gettime 在允许列表中时才强制使用
         if not allowed_tool_names:
@@ -46,6 +71,7 @@ def select_tool_choice(last_message: str,
         else:
             # gettime 不在允许列表中，不强制使用（让模型自由选择或不用工具）
             return None
+    
     return None
 
 

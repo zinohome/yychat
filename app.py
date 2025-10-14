@@ -784,32 +784,12 @@ async def websocket_chat(websocket: WebSocket):
                 break
             except json.JSONDecodeError as e:
                 log.error(f"JSON解析错误: {client_id}, 错误: {e}")
-                try:
-                    await websocket_manager.send_message(client_id, {
-                        "type": "error",
-                        "error": {
-                            "message": "Invalid JSON format",
-                            "type": "json_parse_error",
-                            "code": "invalid_json"
-                        }
-                    })
-                except Exception as send_error:
-                    log.error(f"发送错误消息失败: {client_id}, 错误: {send_error}")
-                    break
+                # 不尝试发送错误消息，直接断开连接避免死循环
+                break
             except Exception as e:
                 log.error(f"WebSocket消息处理错误: {client_id}, 错误: {e}")
-                try:
-                    await websocket_manager.send_message(client_id, {
-                        "type": "error",
-                        "error": {
-                            "message": "Message processing error",
-                            "type": "processing_error",
-                            "code": "processing_failed"
-                        }
-                    })
-                except Exception as send_error:
-                    log.error(f"发送错误消息失败: {client_id}, 错误: {send_error}")
-                    break
+                # 不尝试发送错误消息，直接断开连接避免死循环
+                break
     
     except Exception as e:
         log.error(f"WebSocket连接错误: {client_id}, 错误: {e}")

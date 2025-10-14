@@ -183,6 +183,7 @@ class McpSseClient(McpClient):
         super().__init__(name, url, headers, timeout)
         self.sse_read_timeout = sse_read_timeout
         self.endpoint_url = None
+        self.message_url = None
         self.client = httpx.Client(headers=headers, timeout=httpx.Timeout(timeout, read=sse_read_timeout))
         self.message_dict = {}
         self.response_ready = Event()
@@ -215,17 +216,11 @@ class McpSseClient(McpClient):
                         break
                     match sse.event:
                         case "endpoint":
-                            # self.endpoint_url = urljoin(self.url, sse.data)
-                            self.endpoint_url = urljoin(self.url.rstrip("/"), sse.data.lstrip("/"))
-                            log.debug(f"{self.name} - Received endpoint URL: {self.endpoint_url}")
+                            # 固定为使用 mcp.json 的主机名 + /mcp/message，不接受带 sessionId 的端点
+                            base = f"{urlparse(self.url).scheme}://{urlparse(self.url).netloc}"
+                            self.message_url = urljoin(base + '/', 'mcp/message')
+                            log.debug(f"{self.name} - Using fixed message URL: {self.message_url}")
                             self._connected.set()
-                            url_parsed = urlparse(self.url)
-                            endpoint_parsed = urlparse(self.endpoint_url)
-                            if (url_parsed.netloc != endpoint_parsed.netloc
-                                    or url_parsed.scheme != endpoint_parsed.scheme):
-                                error_msg = f"{self.name} - Endpoint origin does not match connection origin: {self.endpoint_url}"
-                                log.error(error_msg)
-                                raise ValueError(error_msg)
                         case "message":
                             message = json.loads(sse.data)
                             #log.debug(f"{self.name} - Received server message: {message}")
@@ -239,14 +234,14 @@ class McpSseClient(McpClient):
             self._connected.set()
 
     def send_message(self, data: dict) -> dict:
-        if not self.endpoint_url:
+        if not (self.message_url or self.endpoint_url):
             if self._thread_exception:
                 raise ConnectionError(f"{self.name} - MCP Server connection failed: {self._thread_exception}")
             else:
                 raise RuntimeError(f"{self.name} - Please call connect() first")
         log.debug(f"{self.name} - Sending client message: {data}")
         response = self.client.post(
-            url=self.endpoint_url,
+            url=(self.message_url or self.endpoint_url),
             json=data,
             headers={"Content-Type": "application/json"},
             timeout=httpx.Timeout(self.timeout),

@@ -109,14 +109,47 @@ class ChatEngine(BaseEngine):
                             yield {"role": "assistant", "content": error_msg, "finish_reason": "error", "stream": True}
                         return error_gen()
                     return {"role": "assistant", "content": error_msg}
-                if "role" not in msg or "content" not in msg:
-                    error_msg = f"消息 #{idx} 格式错误：缺少必需的 'role' 或 'content' 字段"
+                
+                # 检查必需字段，但允许工具消息格式
+                if "role" not in msg:
+                    error_msg = f"消息 #{idx} 格式错误：缺少必需的 'role' 字段"
                     log.error(error_msg)
                     if stream:
                         async def error_gen():
                             yield {"role": "assistant", "content": error_msg, "finish_reason": "error", "stream": True}
                         return error_gen()
                     return {"role": "assistant", "content": error_msg}
+                
+                # 对于工具消息，允许没有content字段（使用tool_call_id）
+                if msg["role"] == "tool":
+                    if "tool_call_id" not in msg and "content" not in msg:
+                        error_msg = f"消息 #{idx} 格式错误：工具消息缺少 'tool_call_id' 或 'content' 字段"
+                        log.error(error_msg)
+                        if stream:
+                            async def error_gen():
+                                yield {"role": "assistant", "content": error_msg, "finish_reason": "error", "stream": True}
+                            return error_gen()
+                        return {"role": "assistant", "content": error_msg}
+                elif msg["role"] == "assistant":
+                    # assistant消息可以包含tool_calls或content，或两者都有
+                    if "content" not in msg and "tool_calls" not in msg:
+                        error_msg = f"消息 #{idx} 格式错误：assistant消息缺少 'content' 或 'tool_calls' 字段"
+                        log.error(error_msg)
+                        if stream:
+                            async def error_gen():
+                                yield {"role": "assistant", "content": error_msg, "finish_reason": "error", "stream": True}
+                            return error_gen()
+                        return {"role": "assistant", "content": error_msg}
+                else:
+                    # 其他角色消息必须有content字段
+                    if "content" not in msg:
+                        error_msg = f"消息 #{idx} 格式错误：缺少必需的 'content' 字段"
+                        log.error(error_msg)
+                        if stream:
+                            async def error_gen():
+                                yield {"role": "assistant", "content": error_msg, "finish_reason": "error", "stream": True}
+                            return error_gen()
+                        return {"role": "assistant", "content": error_msg}
             
             # 打印传入的参数值，用于调试
             log.debug(f"传入参数 - personality_id: {personality_id}, use_tools: {use_tools}, stream: {stream}, type(personality_id): {type(personality_id)}, type(use_tools): {type(use_tools)}, type(stream): {type(stream)}")
