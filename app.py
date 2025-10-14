@@ -139,6 +139,20 @@ async def lifespan(app: FastAPI):
         # 初始化并注册MCP工具
         try:
             discover_and_register_mcp_tools()
+            # 若首次为0，短暂重试以等待远端SSE握手完成
+            retries = 0
+            mcp_count = 0
+            while retries < 3:
+                try:
+                    mcp_count = len(tool_registry.list_tools(tool_type="mcp"))
+                except Exception:
+                    mcp_count = 0
+                if mcp_count > 0:
+                    break
+                retries += 1
+                log.debug(f"MCP工具数量为0，等待远端初始化后重试({retries}/3)…")
+                await asyncio.sleep(0.5)
+            log.info(f"✅ 启动加载MCP工具完成，共 {mcp_count} 个")
         except Exception as e:
             log.error(f"Failed to initialize MCP tools: {str(e)}")
         

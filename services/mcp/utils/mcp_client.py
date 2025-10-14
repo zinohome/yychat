@@ -216,10 +216,9 @@ class McpSseClient(McpClient):
                         break
                     match sse.event:
                         case "endpoint":
-                            # 固定为使用 mcp.json 的主机名 + /mcp/message，不接受带 sessionId 的端点
-                            base = f"{urlparse(self.url).scheme}://{urlparse(self.url).netloc}"
-                            self.message_url = urljoin(base + '/', 'mcp/message')
-                            log.debug(f"{self.name} - Using fixed message URL: {self.message_url}")
+                            # 严格使用服务器返回的 endpoint，不修改、不追加
+                            self.endpoint_url = urljoin(self.url.rstrip("/"), sse.data.lstrip("/"))
+                            log.debug(f"{self.name} - Received endpoint URL: {self.endpoint_url}")
                             self._connected.set()
                         case "message":
                             message = json.loads(sse.data)
@@ -234,14 +233,14 @@ class McpSseClient(McpClient):
             self._connected.set()
 
     def send_message(self, data: dict) -> dict:
-        if not (self.message_url or self.endpoint_url):
+        if not self.endpoint_url:
             if self._thread_exception:
                 raise ConnectionError(f"{self.name} - MCP Server connection failed: {self._thread_exception}")
             else:
                 raise RuntimeError(f"{self.name} - Please call connect() first")
         log.debug(f"{self.name} - Sending client message: {data}")
         response = self.client.post(
-            url=(self.message_url or self.endpoint_url),
+            url=self.endpoint_url,
             json=data,
             headers={"Content-Type": "application/json"},
             timeout=httpx.Timeout(self.timeout),
