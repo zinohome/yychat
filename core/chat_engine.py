@@ -996,6 +996,23 @@ class ChatEngine(BaseEngine):
                 tool for tool in all_tools_schema 
                 if tool.get('function', {}).get('name') in allowed_tool_names
             ]
+            # 兜底：若允许列表中的某些工具未出现在schema里（常见于MCP工具未及时注册）
+            if len(filtered_tools) < len(allowed_tool_names):
+                from services.mcp.discovery import discover_and_register_mcp_tools
+                missing = [name for name in allowed_tool_names if name not in {t.get('function', {}).get('name') for t in filtered_tools}]
+                if missing:
+                    log.info(f"允许工具中缺少schema，尝试发现并注册MCP工具: {missing}")
+                    try:
+                        discover_and_register_mcp_tools()
+                        # 重新获取并过滤
+                        all_tools_schema = tool_registry.get_functions_schema()
+                        filtered_tools = [
+                            tool for tool in all_tools_schema 
+                            if tool.get('function', {}).get('name') in allowed_tool_names
+                        ]
+                        log.info(f"MCP工具注册后可用schema数量: {len(filtered_tools)}")
+                    except Exception as e:
+                        log.warning(f"MCP工具发现失败，继续使用现有schema: {e}")
             
             log.info(f"应用personality {personality_id} 的工具限制，允许的工具: {allowed_tool_names}, 过滤后数量: {len(filtered_tools)}/{len(all_tools_schema)}")
             
