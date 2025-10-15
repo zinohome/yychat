@@ -93,7 +93,9 @@ class MessageRouter:
             handler = self.handlers[message_type]
             try:
                 await handler(client_id, message)
-                log.debug(f"消息处理成功: {client_id} -> {message_type}")
+                # 注释掉心跳消息处理成功的日志，减少日志噪音
+                if message_type not in ['heartbeat', 'heartbeat_response']:
+                    log.debug(f"消息处理成功: {client_id} -> {message_type}")
                 return True
             except Exception as e:
                 log.error(f"消息处理失败: {client_id} -> {message_type}, 错误: {e}")
@@ -142,6 +144,32 @@ class MessageRouter:
             return False
         
         return True
+    
+    async def _handle_interrupt(self, client_id: str, message: dict):
+        """
+        处理中断消息
+        """
+        try:
+            session_id = message.get("session_id")
+            message_id = message.get("message_id")
+            interrupt_type = message.get("interrupt_type", "user_interrupt")
+            
+            log.info(f"收到中断请求: client_id={client_id}, session_id={session_id}, message_id={message_id}, type={interrupt_type}")
+            
+            # 发送中断确认通知
+            await websocket_manager.send_interrupt_notification(
+                client_id,
+                session_id=session_id,
+                message_id=message_id,
+                interrupt_type=interrupt_type
+            )
+            
+            # 这里可以添加更多中断逻辑，比如停止正在进行的TTS等
+            log.info(f"中断处理完成: {client_id}")
+            
+        except Exception as e:
+            log.error(f"处理中断消息失败: {e}")
+            raise
     
     async def _send_error_response(self, client_id: str, error_message: str):
         """

@@ -156,6 +156,43 @@ class AudioService:
             log.error(f"文本转语音失败: {e}")
             raise
 
+    async def synthesize_speech_stream(self, text: str, voice: str = "alloy",
+                                       model: str = "tts-1", speed: float = 1.0,
+                                       chunk_size: int = 32 * 1024):
+        """
+        文本转语音（分片流式）
+        说明：当前SDK未提供真正的流式TTS输出，此实现先整体合成再按字节切片，
+        以满足前端按分片播放与带宽平滑的需求；后续如SDK支持流式接口，可在此处替换为真正的流式生成。
+
+        Yields:
+            bytes: 音频数据分片
+        """
+        # 直接复用参数校验逻辑
+        if not text or not text.strip():
+            raise ValueError("文本内容不能为空")
+        if len(text) > 4096:
+            raise ValueError("文本长度不能超过4096个字符")
+        if speed < 0.25 or speed > 4.0:
+            raise ValueError("语速必须在0.25-4.0之间")
+
+        try:
+            # 先整体合成
+            audio_bytes = await self.synthesize_speech(text=text, voice=voice, model=model, speed=speed)
+            total_len = len(audio_bytes)
+            if total_len == 0:
+                log.warning("synthesize_speech_stream: 生成的音频长度为0")
+                return
+
+            # 切片输出
+            offset = 0
+            while offset < total_len:
+                end = min(offset + chunk_size, total_len)
+                yield audio_bytes[offset:end]
+                offset = end
+        except Exception as e:
+            log.error(f"文本转语音(流式)失败: {e}")
+            raise
+
     def text_to_speech(self, text: str, voice: str = "alloy", 
                         model: str = "tts-1", speed: float = 1.0) -> bytes:
         """

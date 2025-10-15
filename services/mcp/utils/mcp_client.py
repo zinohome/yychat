@@ -216,9 +216,72 @@ class McpSseClient(McpClient):
                         break
                     match sse.event:
                         case "endpoint":
-                            # 严格使用服务器返回的 endpoint，不修改、不追加
-                            self.endpoint_url = urljoin(self.url.rstrip("/"), sse.data.lstrip("/"))
-                            log.debug(f"{self.name} - Received endpoint URL: {self.endpoint_url}")
+                            # 如果服务端返回的endpoint包含sessionId，合并原始连接URL的key参数
+                            log.debug(f"{self.name} - Processing endpoint: {sse.data}")
+                            if sse.data.startswith(('http://', 'https://')):
+                                log.debug(f"{self.name} - Endpoint is absolute URL, checking for sessionId")
+                                if 'sessionId=' in sse.data:
+                                    log.debug(f"{self.name} - Found sessionId in endpoint, merging with key")
+                                    # 合并原始连接URL的key参数和服务端endpoint的sessionId参数
+                                    from urllib.parse import urlparse, urlunparse, parse_qs
+                                    original_parsed = urlparse(self.url)  # 原始连接URL，包含key
+                                    endpoint_parsed = urlparse(sse.data)  # 服务端返回的endpoint
+                                    
+                                    # 获取原始URL的key参数
+                                    original_params = parse_qs(original_parsed.query)
+                                    endpoint_params = parse_qs(endpoint_parsed.query)
+                                    
+                                    # 合并参数：保留endpoint的sessionId，添加原始URL的key
+                                    merged_params = endpoint_params.copy()  # 保留sessionId
+                                    if 'key' in original_params:
+                                        merged_params['key'] = original_params['key']  # 添加key参数
+                                    
+                                    # 构建新的查询字符串
+                                    new_query = '&'.join([f"{k}={v[0]}" for k, v in merged_params.items()])
+                                    
+                                    # 使用endpoint的路径，合并key和sessionId参数
+                                    self.endpoint_url = urlunparse((
+                                        endpoint_parsed.scheme, 
+                                        endpoint_parsed.netloc, 
+                                        endpoint_parsed.path, 
+                                        endpoint_parsed.params, 
+                                        new_query, 
+                                        endpoint_parsed.fragment
+                                    ))
+                                    log.debug(f"{self.name} - Merged endpoint with key and sessionId: {sse.data} + {self.url} -> {self.endpoint_url}")
+                                else:
+                                    log.debug(f"{self.name} - No sessionId found in endpoint, using as-is")
+                                    self.endpoint_url = sse.data
+                            else:
+                                # 对于相对URL，需要保留原始URL的key参数
+                                from urllib.parse import urlparse, urlunparse, parse_qs
+                                original_parsed = urlparse(self.url)
+                                original_params = parse_qs(original_parsed.query)
+                                
+                                # 构建相对路径的完整URL
+                                relative_url = urljoin(self.url.rstrip("/"), sse.data.lstrip("/"))
+                                relative_parsed = urlparse(relative_url)
+                                relative_params = parse_qs(relative_parsed.query)
+                                
+                                # 合并参数：保留原始URL的key参数
+                                merged_params = relative_params.copy()
+                                if 'key' in original_params:
+                                    merged_params['key'] = original_params['key']
+                                
+                                # 构建新的查询字符串
+                                new_query = '&'.join([f"{k}={v[0]}" for k, v in merged_params.items()])
+                                
+                                # 构建最终URL
+                                self.endpoint_url = urlunparse((
+                                    relative_parsed.scheme,
+                                    relative_parsed.netloc,
+                                    relative_parsed.path,
+                                    relative_parsed.params,
+                                    new_query,
+                                    relative_parsed.fragment
+                                ))
+                                log.debug(f"{self.name} - Merged relative endpoint with key: {sse.data} + {self.url} -> {self.endpoint_url}")
+                            log.debug(f"{self.name} - Final endpoint URL: {self.endpoint_url}")
                             self._connected.set()
                         case "message":
                             message = json.loads(sse.data)
@@ -239,6 +302,7 @@ class McpSseClient(McpClient):
             else:
                 raise RuntimeError(f"{self.name} - Please call connect() first")
         log.debug(f"{self.name} - Sending client message: {data}")
+        log.debug(f"{self.name} - Using endpoint URL: {self.endpoint_url}")
         response = self.client.post(
             url=self.endpoint_url,
             json=data,

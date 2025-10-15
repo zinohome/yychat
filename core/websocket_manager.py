@@ -177,9 +177,11 @@ class WebSocketManager:
             msg_type = message.get("type", "unknown")
             session_id = message.get("session_id") or message.get("conversation_id")
             message_id = message.get("message_id")
-            log.debug(
-                f"WS下行 | type={msg_type} client_id={client_id} session_id={session_id} message_id={message_id}"
-            )
+            # 注释掉心跳消息的WS下行日志，减少日志噪音
+            if msg_type not in ['heartbeat', 'heartbeat_response']:
+                log.debug(
+                    f"WS下行 | type={msg_type} client_id={client_id} session_id={session_id} message_id={message_id}"
+                )
 
             # 发送消息
             await connection_info.websocket.send_text(message_str)
@@ -228,6 +230,53 @@ class WebSocketManager:
         
         log.info(f"广播消息完成: 成功 {success_count}/{len(self.active_connections)}")
         return success_count
+
+    async def send_audio_stream(self, client_id: str, *, session_id: str, message_id: str,
+                                payload_base64: str, codec: str, seq: int) -> bool:
+        """
+        发送音频分片（严格按client_id定向发送）
+        """
+        message = {
+            "type": "audio_stream",
+            "client_id": client_id,
+            "session_id": session_id,
+            "message_id": message_id,
+            "codec": codec,
+            "seq": seq,
+            "audio": payload_base64
+        }
+        return await self.send_message(client_id, message)
+
+    async def send_synthesis_complete(self, client_id: str, *, session_id: str, message_id: str,
+                                      duration_ms: Optional[int] = None) -> bool:
+        """
+        发送合成完成事件
+        """
+        message = {
+            "type": "synthesis_complete",
+            "client_id": client_id,
+            "session_id": session_id,
+            "message_id": message_id
+        }
+        if duration_ms is not None:
+            message["duration_ms"] = duration_ms
+        return await self.send_message(client_id, message)
+    
+    async def send_interrupt_notification(self, client_id: str, *, session_id: str, message_id: str,
+                                         interrupt_type: str = "user_interrupt") -> bool:
+        """
+        发送中断通知给指定客户端
+        """
+        import time
+        message = {
+            "type": "interrupt_notification",
+            "client_id": client_id,
+            "session_id": session_id,
+            "message_id": message_id,
+            "interrupt_type": interrupt_type,
+            "timestamp": time.time()
+        }
+        return await self.send_message(client_id, message)
     
     async def send_heartbeat(self, client_id: str) -> bool:
         """
@@ -254,7 +303,8 @@ class WebSocketManager:
         """
         if client_id in self.active_connections:
             self.active_connections[client_id].update_heartbeat()
-            log.debug(f"收到心跳响应: {client_id}")
+            # 注释掉心跳响应日志，减少日志噪音
+            # log.debug(f"收到心跳响应: {client_id}")
     
     def get_connection_info(self, client_id: str) -> Optional[ConnectionInfo]:
         """

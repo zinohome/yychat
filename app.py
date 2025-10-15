@@ -179,6 +179,7 @@ async def lifespan(app: FastAPI):
         message_router.register_handler("audio_stream", handle_audio_stream)
         message_router.register_handler("voice_command", handle_voice_command)
         message_router.register_handler("status_query", handle_status_query)
+        message_router.register_handler("interrupt", message_router._handle_interrupt)
         log.info("✅ 消息处理器重新注册完成")
         
         log.info("✅ 应用初始化完成")
@@ -268,6 +269,9 @@ async def create_chat_completion(request: ChatCompletionRequest, api_key: str = 
                     message_id = request.message_id or f"msg-{uuid.uuid4().hex[:8]}"
                     enable_voice = bool(getattr(request, "enable_voice", False))
                     client_id = getattr(request, "client_id", None)
+                    
+                    # 中断标志
+                    interrupted = False
 
                     # 发出stream_start元事件（向后兼容：作为单独SSE事件，不改变原chunk结构）
                     log.debug(f"SSE stream_start: session_id={session_id}, message_id={message_id}, enable_voice={enable_voice}, client_id={client_id}")
@@ -302,6 +306,11 @@ async def create_chat_completion(request: ChatCompletionRequest, api_key: str = 
                 try:
                     full_content_parts = []
                     async for chunk in generator:
+                        # 检查是否被中断
+                        if interrupted:
+                            log.info(f"SSE流被中断: session_id={session_id}, message_id={message_id}")
+                            break
+                            
                         if chunk.get("stream", False):
                             response_data = {
                                 "id": f"chatcmpl-{conversation_id}",
@@ -346,42 +355,53 @@ async def create_chat_completion(request: ChatCompletionRequest, api_key: str = 
                 except Exception as end_err:
                     log.warning(f"emit stream_end meta failed: {end_err}")
 
-                # 简版TTS：SSE完成后，如果enable_voice=true且提供client_id，则一次性合成并经WS回传
+                # TTS派发：若启用语音且提供client_id
                 if enable_voice and client_id:
                     try:
                         # 为保证不阻塞SSE返回，这里异步触发WS推送
-                        async def _tts_and_push():
+                        async def _tts_and_push_streaming():
                             try:
                                 if not full_content_parts:
                                     log.debug("TTS skipped: empty content")
                                     return
                                 text_to_speak = "".join(full_content_parts)
-                                log.info(f"TTS scheduling: len={len(text_to_speak)}, session_id={session_id}, message_id={message_id}, client_id={client_id}")
-                                # 使用统一封装方法，优先异步
-                                tts_bytes = await audio_service.text_to_speech_async(text_to_speak)
-                                audio_bytes = tts_bytes or b""
-                                if not audio_bytes:
-                                    log.warning("TTS produced empty audio bytes")
-                                # 通过WS定向发送
-                                await websocket_manager.send_message(client_id, {
-                                    "type": "voice_response",
-                                    "client_id": client_id,
-                                    "session_id": session_id,
-                                    "message_id": message_id,
-                                    "audio": base64.b64encode(audio_bytes).decode("utf-8")
-                                })
-                                # 结束标记
-                                await websocket_manager.send_message(client_id, {
-                                    "type": "synthesis_complete",
-                                    "client_id": client_id,
-                                    "session_id": session_id,
-                                    "message_id": message_id
-                                })
-                                log.info(f"TTS sent over WS: session_id={session_id}, message_id={message_id}, client_id={client_id}, bytes={len(audio_bytes)}")
+                                log.info(f"TTS scheduling(stream): len={len(text_to_speak)}, session_id={session_id}, message_id={message_id}, client_id={client_id}")
+                                # 使用流式TTS接口，分片发送
+                                seq = 0
+                                total_bytes = 0
+                                async for audio_chunk in audio_service.synthesize_speech_stream(text_to_speak):
+                                    # 检查是否被中断
+                                    if interrupted:
+                                        log.info(f"TTS被中断: session_id={session_id}, message_id={message_id}")
+                                        break
+                                        
+                                    if not audio_chunk:
+                                        continue
+                                    total_bytes += len(audio_chunk)
+                                    await websocket_manager.send_audio_stream(
+                                        client_id,
+                                        session_id=session_id,
+                                        message_id=message_id,
+                                        payload_base64=base64.b64encode(audio_chunk).decode("utf-8"),
+                                        codec="audio/mpeg",
+                                        seq=seq
+                                    )
+                                    seq += 1
+                                
+                                # 只有在未被中断时才发送完成信号
+                                if not interrupted:
+                                    await websocket_manager.send_synthesis_complete(
+                                        client_id,
+                                        session_id=session_id,
+                                        message_id=message_id
+                                    )
+                                    log.info(f"TTS streaming sent over WS: session_id={session_id}, message_id={message_id}, client_id={client_id}, bytes={total_bytes}, chunks={seq}")
+                                else:
+                                    log.info(f"TTS interrupted: session_id={session_id}, message_id={message_id}")
                             except Exception as tts_err:
                                 log.error(f"TTS dispatch failed: {tts_err}", exc_info=True)
 
-                        asyncio.create_task(_tts_and_push())
+                        asyncio.create_task(_tts_and_push_streaming())
                     except Exception as disp_err:
                         log.error(f"schedule TTS failed: {disp_err}", exc_info=True)
                 elif enable_voice and not client_id:
