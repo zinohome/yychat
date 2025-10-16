@@ -234,7 +234,7 @@ class McpSseClient(McpClient):
                                     # 合并参数：保留endpoint的sessionId，添加原始URL的key
                                     merged_params = endpoint_params.copy()  # 保留sessionId
                                     if 'key' in original_params:
-                                        merged_params['key'] = original_params['key']  # 添加key参数
+                                        merged_params['key'] = original_params['key']  # 添加key参数（保持列表格式）
                                     
                                     # 构建新的查询字符串
                                     new_query = '&'.join([f"{k}={v[0]}" for k, v in merged_params.items()])
@@ -266,7 +266,7 @@ class McpSseClient(McpClient):
                                 # 合并参数：保留原始URL的key参数
                                 merged_params = relative_params.copy()
                                 if 'key' in original_params:
-                                    merged_params['key'] = original_params['key']
+                                    merged_params['key'] = original_params['key']  # 添加key参数（保持列表格式）
                                 
                                 # 构建新的查询字符串
                                 new_query = '&'.join([f"{k}={v[0]}" for k, v in merged_params.items()])
