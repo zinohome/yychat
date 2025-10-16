@@ -305,6 +305,14 @@ async def create_chat_completion(request: ChatCompletionRequest, api_key: str = 
                 
                 try:
                     full_content_parts = []
+                    
+                    # 初始化流式TTS管理器
+                    tts_manager = None
+                    if enable_voice and client_id:
+                        from services.streaming_tts_manager import StreamingTTSManager
+                        tts_manager = StreamingTTSManager()
+                        log.info(f"TTS streaming initialized: session_id={session_id}, message_id={message_id}, client_id={client_id}")
+                    
                     async for chunk in generator:
                         # 检查是否被中断
                         if interrupted:
@@ -322,9 +330,21 @@ async def create_chat_completion(request: ChatCompletionRequest, api_key: str = 
                                 "meta": {"message_id": message_id, "session_id": session_id}
                             }
                             yield f"data: {json.dumps(response_data)}\n\n"
+                            
                             # 累积文本用于简版TTS
                             if isinstance(chunk.get("content"), str):
                                 full_content_parts.append(chunk["content"])
+                                
+                                # 流式TTS处理：非阻塞处理
+                                if tts_manager:
+                                    try:
+                                        # 直接调用，不等待完成
+                                        tts_manager.process_streaming_text(
+                                            chunk["content"], client_id, session_id, message_id, "alloy"
+                                        )
+                                    except Exception as tts_err:
+                                        log.error(f"Streaming TTS processing failed: {tts_err}")
+                            
                             if chunk["finish_reason"] is not None:
                                 break
                 except Exception as iter_err:
@@ -355,55 +375,13 @@ async def create_chat_completion(request: ChatCompletionRequest, api_key: str = 
                 except Exception as end_err:
                     log.warning(f"emit stream_end meta failed: {end_err}")
 
-                # TTS派发：若启用语音且提供client_id
-                if enable_voice and client_id:
+                # 完成流式TTS处理
+                if tts_manager:
                     try:
-                        # 为保证不阻塞SSE返回，这里异步触发WS推送
-                        async def _tts_and_push_streaming():
-                            try:
-                                if not full_content_parts:
-                                    log.debug("TTS skipped: empty content")
-                                    return
-                                text_to_speak = "".join(full_content_parts)
-                                log.info(f"TTS scheduling(stream): len={len(text_to_speak)}, session_id={session_id}, message_id={message_id}, client_id={client_id}")
-                                # 使用流式TTS接口，分片发送
-                                seq = 0
-                                total_bytes = 0
-                                async for audio_chunk in audio_service.synthesize_speech_stream(text_to_speak):
-                                    # 检查是否被中断
-                                    if interrupted:
-                                        log.info(f"TTS被中断: session_id={session_id}, message_id={message_id}")
-                                        break
-                                        
-                                    if not audio_chunk:
-                                        continue
-                                    total_bytes += len(audio_chunk)
-                                    await websocket_manager.send_audio_stream(
-                                        client_id,
-                                        session_id=session_id,
-                                        message_id=message_id,
-                                        payload_base64=base64.b64encode(audio_chunk).decode("utf-8"),
-                                        codec="audio/mpeg",
-                                        seq=seq
-                                    )
-                                    seq += 1
-                                
-                                # 只有在未被中断时才发送完成信号
-                                if not interrupted:
-                                    await websocket_manager.send_synthesis_complete(
-                                        client_id,
-                                        session_id=session_id,
-                                        message_id=message_id
-                                    )
-                                    log.info(f"TTS streaming sent over WS: session_id={session_id}, message_id={message_id}, client_id={client_id}, bytes={total_bytes}, chunks={seq}")
-                                else:
-                                    log.info(f"TTS interrupted: session_id={session_id}, message_id={message_id}")
-                            except Exception as tts_err:
-                                log.error(f"TTS dispatch failed: {tts_err}", exc_info=True)
-
-                        asyncio.create_task(_tts_and_push_streaming())
-                    except Exception as disp_err:
-                        log.error(f"schedule TTS failed: {disp_err}", exc_info=True)
+                        await tts_manager.finalize_tts(client_id, session_id, message_id, "alloy")
+                        log.info(f"TTS streaming completed: session_id={session_id}, message_id={message_id}, client_id={client_id}")
+                    except Exception as tts_err:
+                        log.error(f"TTS finalization failed: {tts_err}", exc_info=True)
                 elif enable_voice and not client_id:
                     log.warning(f"enable_voice=true but missing client_id; skip TTS. session_id={session_id}, message_id={message_id}")
             

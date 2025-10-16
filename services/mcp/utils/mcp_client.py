@@ -216,72 +216,10 @@ class McpSseClient(McpClient):
                         break
                     match sse.event:
                         case "endpoint":
-                            # 如果服务端返回的endpoint包含sessionId，合并原始连接URL的key参数
-                            log.debug(f"{self.name} - Processing endpoint: {sse.data}")
-                            if sse.data.startswith(('http://', 'https://')):
-                                log.debug(f"{self.name} - Endpoint is absolute URL, checking for sessionId")
-                                if 'sessionId=' in sse.data:
-                                    log.debug(f"{self.name} - Found sessionId in endpoint, merging with key")
-                                    # 合并原始连接URL的key参数和服务端endpoint的sessionId参数
-                                    from urllib.parse import urlparse, urlunparse, parse_qs
-                                    original_parsed = urlparse(self.url)  # 原始连接URL，包含key
-                                    endpoint_parsed = urlparse(sse.data)  # 服务端返回的endpoint
-                                    
-                                    # 获取原始URL的key参数
-                                    original_params = parse_qs(original_parsed.query)
-                                    endpoint_params = parse_qs(endpoint_parsed.query)
-                                    
-                                    # 合并参数：保留endpoint的sessionId，添加原始URL的key
-                                    merged_params = endpoint_params.copy()  # 保留sessionId
-                                    if 'key' in original_params:
-                                        merged_params['key'] = original_params['key']  # 添加key参数（保持列表格式）
-                                    
-                                    # 构建新的查询字符串
-                                    new_query = '&'.join([f"{k}={v[0]}" for k, v in merged_params.items()])
-                                    
-                                    # 使用endpoint的路径，合并key和sessionId参数
-                                    self.endpoint_url = urlunparse((
-                                        endpoint_parsed.scheme, 
-                                        endpoint_parsed.netloc, 
-                                        endpoint_parsed.path, 
-                                        endpoint_parsed.params, 
-                                        new_query, 
-                                        endpoint_parsed.fragment
-                                    ))
-                                    log.debug(f"{self.name} - Merged endpoint with key and sessionId: {sse.data} + {self.url} -> {self.endpoint_url}")
-                                else:
-                                    log.debug(f"{self.name} - No sessionId found in endpoint, using as-is")
-                                    self.endpoint_url = sse.data
-                            else:
-                                # 对于相对URL，需要保留原始URL的key参数
-                                from urllib.parse import urlparse, urlunparse, parse_qs
-                                original_parsed = urlparse(self.url)
-                                original_params = parse_qs(original_parsed.query)
-                                
-                                # 构建相对路径的完整URL
-                                relative_url = urljoin(self.url.rstrip("/"), sse.data.lstrip("/"))
-                                relative_parsed = urlparse(relative_url)
-                                relative_params = parse_qs(relative_parsed.query)
-                                
-                                # 合并参数：保留原始URL的key参数
-                                merged_params = relative_params.copy()
-                                if 'key' in original_params:
-                                    merged_params['key'] = original_params['key']  # 添加key参数（保持列表格式）
-                                
-                                # 构建新的查询字符串
-                                new_query = '&'.join([f"{k}={v[0]}" for k, v in merged_params.items()])
-                                
-                                # 构建最终URL
-                                self.endpoint_url = urlunparse((
-                                    relative_parsed.scheme,
-                                    relative_parsed.netloc,
-                                    relative_parsed.path,
-                                    relative_parsed.params,
-                                    new_query,
-                                    relative_parsed.fragment
-                                ))
-                                log.debug(f"{self.name} - Merged relative endpoint with key: {sse.data} + {self.url} -> {self.endpoint_url}")
-                            log.debug(f"{self.name} - Final endpoint URL: {self.endpoint_url}")
+                            # 处理服务端返回的工具调用endpoint
+                            log.debug(f"{self.name} - 收到工具调用endpoint: {sse.data}")
+                            self.endpoint_url = self._merge_endpoint_url(sse.data)
+                            log.debug(f"{self.name} - 工具调用URL构建完成: {self.endpoint_url}")
                             self._connected.set()
                         case "message":
                             message = json.loads(sse.data)
@@ -295,26 +233,128 @@ class McpSseClient(McpClient):
             self._error_event.set()
             self._connected.set()
 
+    def _merge_endpoint_url(self, endpoint_data: str) -> str:
+        """
+        正确处理MCP服务发现和工具调用的URL：
+        1. SSE连接：使用mcp.json中的URL（/sse?key=xxx）
+        2. 工具调用：使用服务端返回的endpoint（/mcp/message?sessionId=xxx）
+        """
+        from urllib.parse import urlparse, parse_qs, urlencode
+        
+        log.debug(f"{self.name} - 原始SSE连接URL: {self.url}")
+        log.debug(f"{self.name} - 服务端返回endpoint: {endpoint_data}")
+        
+        # 获取原始SSE连接URL的key参数
+        original_parsed = urlparse(self.url)
+        original_params = parse_qs(original_parsed.query)
+        original_key = original_params.get('key', [None])[0]
+        
+        if not original_key:
+            log.error(f"{self.name} - 原始SSE连接URL中缺少key参数: {self.url}")
+            return endpoint_data  # 返回原始endpoint，让服务端处理
+        
+        # 处理服务端返回的endpoint
+        if endpoint_data.startswith(('http://', 'https://')):
+            # 绝对URL：直接使用服务端返回的完整URL
+            log.debug(f"{self.name} - 使用服务端返回的绝对URL: {endpoint_data}")
+            # 检查绝对URL是否包含key参数
+            if 'key=' not in endpoint_data:
+                log.warning(f"{self.name} - 绝对URL缺少key参数，添加key: {original_key}")
+                separator = '&' if '?' in endpoint_data else '?'
+                final_url = f"{endpoint_data}{separator}key={original_key}"
+                log.debug(f"{self.name} - 添加key后的绝对URL: {final_url}")
+                return final_url
+            return endpoint_data
+        else:
+            # 相对URL：构建完整URL，使用服务端返回的路径
+            from urllib.parse import urljoin
+            base_url = f"{original_parsed.scheme}://{original_parsed.netloc}"
+            full_url = urljoin(base_url, endpoint_data)
+            
+            # 确保key参数存在（工具调用需要key参数）
+            full_parsed = urlparse(full_url)
+            full_params = parse_qs(full_parsed.query)
+            if 'key' not in full_params:
+                full_params['key'] = [original_key]
+                new_query = urlencode({k: v[0] for k, v in full_params.items()}, doseq=True)
+                final_url = f"{full_parsed.scheme}://{full_parsed.netloc}{full_parsed.path}?{new_query}"
+                log.debug(f"{self.name} - 相对URL添加key参数: {final_url}")
+                return final_url
+            else:
+                log.debug(f"{self.name} - 相对URL已包含key参数: {full_url}")
+                return full_url
+
+    def _validate_and_fix_endpoint_url(self) -> None:
+        """
+        验证工具调用URL：确保key参数存在
+        """
+        if not self.endpoint_url:
+            log.warning(f"{self.name} - 工具调用URL为空")
+            return
+        
+        log.debug(f"{self.name} - 验证工具调用URL: {self.endpoint_url}")
+        
+        # 检查工具调用URL是否包含key参数
+        if 'key=' not in self.endpoint_url:
+            log.error(f"{self.name} - 工具调用URL缺少key参数: {self.endpoint_url}")
+            # 从原始SSE连接URL获取key并添加
+            from urllib.parse import urlparse, parse_qs, urlencode
+            original_parsed = urlparse(self.url)
+            original_params = parse_qs(original_parsed.query)
+            original_key = original_params.get('key', [None])[0]
+            
+            if original_key:
+                # 添加key参数
+                separator = '&' if '?' in self.endpoint_url else '?'
+                self.endpoint_url = f"{self.endpoint_url}{separator}key={original_key}"
+                log.info(f"{self.name} - 已添加key参数到工具调用URL: {self.endpoint_url}")
+            else:
+                log.error(f"{self.name} - 无法获取key参数，使用原始SSE连接URL")
+                self.endpoint_url = self.url
+        else:
+            log.debug(f"{self.name} - 工具调用URL验证通过: {self.endpoint_url}")
+
     def send_message(self, data: dict) -> dict:
         if not self.endpoint_url:
             if self._thread_exception:
                 raise ConnectionError(f"{self.name} - MCP Server connection failed: {self._thread_exception}")
             else:
                 raise RuntimeError(f"{self.name} - Please call connect() first")
-        log.debug(f"{self.name} - Sending client message: {data}")
-        log.debug(f"{self.name} - Using endpoint URL: {self.endpoint_url}")
-        response = self.client.post(
-            url=self.endpoint_url,
-            json=data,
-            headers={"Content-Type": "application/json"},
-            timeout=httpx.Timeout(self.timeout),
-            follow_redirects=True,
-        )
-        response.raise_for_status()
-        log.debug(f"response status: {response.status_code} {response.reason_phrase}")
-        if not response.is_success:
-            raise ValueError(
-                f"{self.name} - MCP Server response: {response.status_code} {response.reason_phrase} ({response.content})")
+        
+        # 最终保障：在发送前再次验证URL
+        self._validate_and_fix_endpoint_url()
+        
+        log.debug(f"{self.name} - 发送工具调用请求: {data}")
+        log.debug(f"{self.name} - 使用工具调用URL: {self.endpoint_url}")
+        
+        # 添加重试机制
+        max_retries = 2
+        for attempt in range(max_retries + 1):
+            try:
+                response = self.client.post(
+                    url=self.endpoint_url,
+                    json=data,
+                    headers={"Content-Type": "application/json"},
+                    timeout=httpx.Timeout(self.timeout),
+                    follow_redirects=True,
+                )
+                response.raise_for_status()
+                log.debug(f"response status: {response.status_code} {response.reason_phrase}")
+                if not response.is_success:
+                    raise ValueError(
+                        f"{self.name} - MCP Server response: {response.status_code} {response.reason_phrase} ({response.content})")
+                break  # 成功，跳出重试循环
+                
+            except (httpx.HTTPStatusError, httpx.RequestError) as e:
+                if attempt < max_retries:
+                    log.warning(f"{self.name} - 请求失败，重试 {attempt + 1}/{max_retries}: {e}")
+                    # 重新验证URL
+                    self._validate_and_fix_endpoint_url()
+                    log.debug(f"{self.name} - 重试URL: {self.endpoint_url}")
+                    continue
+                else:
+                    log.error(f"{self.name} - 所有重试失败: {e}")
+                    raise
         if "id" in data:
             message_id = data["id"]
             while True:
