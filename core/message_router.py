@@ -4,7 +4,8 @@
 """
 
 import json
-from typing import Dict, Callable, Any, Optional
+import time
+from typing import Dict, Callable, Any, Optional, List
 from utils.log import log
 from core.websocket_manager import websocket_manager
 
@@ -261,8 +262,18 @@ async def handle_get_status(client_id: str, message: dict):
 # 导出处理器函数供lifespan使用
 async def handle_audio_input(client_id: str, message: dict):
     """处理音频输入消息"""
-    from core.realtime_handler import realtime_handler
-    return await realtime_handler.handle_message(client_id, message)
+    try:
+        from core.realtime_handler import realtime_handler
+        return await realtime_handler.handle_message(client_id, message)
+    except Exception as e:
+        log.error(f"音频输入处理失败: {client_id}, 错误: {e}")
+        from core.websocket_manager import websocket_manager
+        await websocket_manager.send_message(client_id, {
+            "type": "error",
+            "message": f"Audio processing failed: {str(e)}",
+            "timestamp": time.time()
+        })
+        return False
 
 async def handle_audio_stream(client_id: str, message: dict):
     """处理音频流消息"""

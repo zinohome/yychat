@@ -25,7 +25,8 @@ class AudioService:
                 api_key=config.OPENAI_API_KEY,
                 base_url=config.OPENAI_BASE_URL
             )
-            self.audio_cache = AudioCache()
+            # 延迟初始化AudioCache，避免循环引用
+            self.audio_cache = None
             log.info("音频服务初始化成功")
         except Exception as e:
             log.error(f"音频服务初始化失败: {e}")
@@ -127,6 +128,8 @@ class AudioService:
                 raise ValueError("语速必须在0.25-4.0之间")
             
             # 检查缓存
+            if self.audio_cache is None:
+                self.audio_cache = AudioCache()
             cache_key = f"{text}_{voice}_{model}_{speed}"
             cached_audio = await self.audio_cache.get(cache_key)
             if cached_audio:
@@ -147,6 +150,8 @@ class AudioService:
             audio_data = response.content
             
             # 缓存结果
+            if self.audio_cache is None:
+                self.audio_cache = AudioCache()
             await self.audio_cache.set(cache_key, audio_data)
             
             log.info(f"文本转语音完成，耗时: {processing_time:.2f}s，音频大小: {len(audio_data)} bytes")

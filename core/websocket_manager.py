@@ -10,6 +10,9 @@ from typing import Dict, List, Optional, Any
 from fastapi import WebSocket, WebSocketDisconnect
 from utils.log import log
 from config.websocket_config import websocket_config
+from core.connection_pool import ConnectionPool
+from core.error_recovery import ErrorRecoveryManager, ErrorType
+from monitoring.voice_performance_monitor import VoicePerformanceMonitor
 
 
 class ConnectionInfo:
@@ -43,10 +46,16 @@ class WebSocketManager:
     """WebSocket连接管理器"""
     
     def __init__(self):
+        # Legacy connection management (for backward compatibility)
         self.active_connections: Dict[str, ConnectionInfo] = {}
         self.connection_metadata: Dict[str, dict] = {}
         self._cleanup_task = None
         self._cleanup_started = False
+        
+        # New connection pool and monitoring
+        self.connection_pool = ConnectionPool(max_connections=100, cleanup_interval=60)
+        self.error_recovery = ErrorRecoveryManager(max_retries=3, base_delay=1.0, max_delay=60.0)
+        self.performance_monitor = VoicePerformanceMonitor(max_samples=1000, collection_interval=1.0)
     
     async def connect(self, websocket: WebSocket, client_id: str) -> bool:
         """

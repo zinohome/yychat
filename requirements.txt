@@ -26,3 +26,7 @@ websockets>=11.0.3
 python-multipart>=0.0.6
 # Audio processing dependencies
 pydub>=0.25.1
+webrtcvad>=2.0.10
+pyaudio>=0.2.13
+psutil>=7.1.0
+webrtcvad>=2.0.10

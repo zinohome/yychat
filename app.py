@@ -1,3 +1,7 @@
+# 在导入其他模块之前应用警告抑制
+from utils.warning_suppression import optimize_imports
+optimize_imports()
+
 import json
 import base64
 import asyncio
@@ -28,6 +32,8 @@ from services.tools.manager import ToolManager
 # 添加引擎管理器导入
 from core.engine_manager import get_engine_manager, get_current_engine
 from core.chat_engine import ChatEngine
+# 添加实时处理器导入（延迟导入避免循环引用）
+# from core.realtime_handler import realtime_handler
 # 添加WebSocket相关导入
 from core.websocket_manager import websocket_manager
 from core.message_router import message_router
@@ -169,6 +175,7 @@ async def lifespan(app: FastAPI):
         # 注册消息处理器（延迟注册，避免重复）
         from handlers.text_message_handler import handle_text_message
         from core.message_router import handle_heartbeat, handle_ping, handle_get_status, handle_audio_input, handle_audio_stream, handle_voice_command, handle_status_query
+        from core.realtime_handler import realtime_handler
         
         # 重新注册所有处理器
         message_router.register_handler("heartbeat", handle_heartbeat)
@@ -180,6 +187,9 @@ async def lifespan(app: FastAPI):
         message_router.register_handler("voice_command", handle_voice_command)
         message_router.register_handler("status_query", handle_status_query)
         message_router.register_handler("interrupt", message_router._handle_interrupt)
+        # 注册实时语音对话处理器
+        message_router.register_handler("start_realtime_dialogue", realtime_handler.handle_message)
+        message_router.register_handler("stop_realtime_dialogue", realtime_handler.handle_message)
         log.info("✅ 消息处理器重新注册完成")
         
         log.info("✅ 应用初始化完成")
@@ -806,7 +816,15 @@ async def websocket_chat(websocket: WebSocket):
     except Exception as e:
         log.error(f"WebSocket连接错误: {client_id}, 错误: {e}")
     finally:
-        # 清理连接
+        # 清理连接和资源
+        try:
+            # 清理实时处理器的客户端资源（延迟导入）
+            from core.realtime_handler import realtime_handler
+            await realtime_handler.cleanup_client(client_id)
+        except Exception as e:
+            log.error(f"清理客户端资源失败: {client_id}, 错误: {e}")
+        
+        # 断开WebSocket连接
         await websocket_manager.disconnect(client_id)
 
 
@@ -832,6 +850,57 @@ async def get_websocket_handlers():
             "middleware": middleware
         }
     }
+
+
+@app.get("/monitoring/voice/metrics", tags=["Monitoring"])
+async def get_voice_metrics():
+    """获取语音性能指标"""
+    try:
+        performance_summary = websocket_manager.performance_monitor.get_performance_summary()
+        return {
+            "status": "success",
+            "data": performance_summary
+        }
+    except Exception as e:
+        log.error(f"Failed to get voice metrics: {e}")
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
+
+@app.get("/monitoring/connection/pool", tags=["Monitoring"])
+async def get_connection_pool_status():
+    """获取连接池状态"""
+    try:
+        pool_stats = websocket_manager.connection_pool.get_statistics()
+        return {
+            "status": "success",
+            "data": pool_stats
+        }
+    except Exception as e:
+        log.error(f"Failed to get connection pool status: {e}")
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
+
+@app.get("/monitoring/error/recovery", tags=["Monitoring"])
+async def get_error_recovery_status():
+    """获取错误恢复状态"""
+    try:
+        recovery_stats = websocket_manager.error_recovery.get_recovery_statistics()
+        return {
+            "status": "success",
+            "data": recovery_stats
+        }
+    except Exception as e:
+        log.error(f"Failed to get error recovery status: {e}")
+        return {
+            "status": "error",
+            "message": str(e)
+        }
 
 
 # ==================== 音频API端点 ====================

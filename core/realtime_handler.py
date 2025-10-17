@@ -11,6 +11,9 @@ from utils.log import log
 from core.websocket_manager import websocket_manager
 from core.chat_engine import ChatEngine
 from core.engine_manager import get_current_engine
+from core.voice_activity_detector import VoiceActivityDetector
+from core.audio_stream_buffer import AudioStreamBuffer
+from core.parallel_audio_processor import ParallelAudioProcessor
 from services.audio_service import audio_service
 from services.voice_personality_service import voice_personality_service
 from schemas.api_schemas import ChatCompletionRequest
@@ -23,6 +26,15 @@ class RealtimeMessageHandler:
         """初始化实时消息处理器"""
         self.chat_engine = None
         self._initialized = False
+        
+        # Initialize VAD and audio processing components
+        self.vad = VoiceActivityDetector(aggressiveness=2, silence_threshold=10)
+        self.audio_buffer = AudioStreamBuffer(max_size=100, chunk_duration=0.1)
+        self.audio_processor = ParallelAudioProcessor(max_workers=4, timeout_seconds=30.0)
+        
+        # Speech state tracking
+        self.speech_segments = {}  # client_id -> speech state
+        
         self._initialize_chat_engine()
         log.info("实时消息处理器初始化成功")
     
@@ -62,11 +74,15 @@ class RealtimeMessageHandler:
             if message_type == "audio_input":
                 return await self._handle_audio_input(client_id, message)
             elif message_type == "audio_stream":
-                return await self._handle_audio_stream(client_id, message)
+                return await self._handle_audio_stream_message(client_id, message)
             elif message_type == "voice_command":
                 return await self._handle_voice_command(client_id, message)
             elif message_type == "status_query":
                 return await self._handle_status_query(client_id, message)
+            elif message_type == "start_realtime_dialogue":
+                return await self._handle_start_realtime_dialogue(client_id, message)
+            elif message_type == "stop_realtime_dialogue":
+                return await self._handle_stop_realtime_dialogue(client_id, message)
             else:
                 await self._send_error_response(client_id, f"Unknown message type: {message_type}")
                 return False
@@ -196,9 +212,9 @@ class RealtimeMessageHandler:
             await self._send_error_response(client_id, f"Audio processing failed: {str(e)}")
             return False
     
-    async def _handle_audio_stream(self, client_id: str, message: dict) -> bool:
+    async def _handle_audio_stream_message(self, client_id: str, message: dict) -> bool:
         """
-        处理音频流
+        处理音频流消息（WebM格式）
         
         Args:
             client_id: 客户端ID
@@ -208,9 +224,27 @@ class RealtimeMessageHandler:
             bool: 处理是否成功
         """
         try:
-            # 音频流处理逻辑
-            # 这里可以实现实时音频流处理
-            log.info(f"处理音频流: {client_id}")
+            audio_data = message.get("audio_data")
+            audio_format = message.get("format", "unknown")
+            
+            if not audio_data:
+                await self._send_error_response(client_id, "Missing audio data")
+                return False
+            
+            # Decode base64 audio data
+            log.info(f"收到音频数据: client={client_id}, format={audio_format}, size={len(audio_data)} bytes (base64)")
+            
+            try:
+                audio_bytes = base64.b64decode(audio_data)
+                log.info(f"解码后音频大小: {len(audio_bytes)} bytes")
+            except Exception as e:
+                log.error(f"Base64 decode failed: {e}")
+                await self._send_error_response(client_id, f"Invalid audio data format: {str(e)}")
+                return False
+            
+            # 直接处理完整音频片段（跳过VAD，直接进行STT+AI+TTS）
+            log.info(f"开始处理音频片段: {client_id}")
+            await self._process_complete_speech(client_id, audio_bytes)
             
             # 发送确认消息
             await websocket_manager.send_message(client_id, {
@@ -222,7 +256,9 @@ class RealtimeMessageHandler:
             return True
             
         except Exception as e:
-            log.error(f"音频流处理失败: {client_id}, 错误: {e}")
+            log.error(f"音频流消息处理失败: {client_id}, 错误: {e}")
+            import traceback
+            log.error(f"Traceback: {traceback.format_exc()}")
             await self._send_error_response(client_id, f"Audio stream processing failed: {str(e)}")
             return False
     
@@ -490,6 +526,185 @@ class RealtimeMessageHandler:
             "client_id": client_id
         })
     
+    async def _handle_audio_stream(self, client_id: str, audio_chunk: bytes):
+        """
+        处理实时音频流数据
+        
+        Args:
+            client_id: 客户端ID
+            audio_chunk: 音频数据块
+        """
+        try:
+            # Add chunk to buffer
+            await self.audio_buffer.add_chunk(client_id, audio_chunk)
+            
+            # Process with VAD
+            speech_change = self.vad.process_audio_stream(client_id, audio_chunk)
+            
+            if speech_change is True:
+                # Speech started
+                await self._handle_speech_start(client_id)
+            elif speech_change is False:
+                # Speech ended
+                await self._handle_speech_end(client_id)
+                
+        except Exception as e:
+            import traceback
+            log.error(f"音频流处理失败: {client_id}, 错误: {type(e).__name__}: {e}")
+            log.error(f"Traceback: {traceback.format_exc()}")
+            await self._send_error_response(client_id, f"Audio stream processing failed: {str(e)}")
+    
+    async def _handle_speech_start(self, client_id: str):
+        """处理语音开始"""
+        try:
+            # Update speech state
+            self.speech_segments[client_id] = {
+                'is_speaking': True,
+                'speech_start': time.time(),
+                'last_activity': time.time()
+            }
+            
+            # Notify client
+            await websocket_manager.send_message(client_id, {
+                "type": "speech_started",
+                "timestamp": time.time(),
+                "client_id": client_id
+            })
+            
+            log.debug(f"语音开始: {client_id}")
+            
+        except Exception as e:
+            log.error(f"语音开始处理失败: {client_id}, 错误: {e}")
+    
+    async def _handle_speech_end(self, client_id: str):
+        """处理语音结束"""
+        try:
+            # Get complete audio data
+            audio_data = await self.audio_buffer.get_complete_audio(client_id, clear_buffer=True)
+            
+            if not audio_data:
+                log.warning(f"语音结束但无音频数据: {client_id}")
+                return
+            
+            # Update speech state
+            if client_id in self.speech_segments:
+                self.speech_segments[client_id]['is_speaking'] = False
+                speech_duration = time.time() - self.speech_segments[client_id].get('speech_start', time.time())
+                log.debug(f"语音结束: {client_id}, 时长: {speech_duration:.2f}s")
+            
+            # Process complete speech
+            await self._process_complete_speech(client_id, audio_data)
+            
+        except Exception as e:
+            log.error(f"语音结束处理失败: {client_id}, 错误: {e}")
+    
+    async def _process_complete_speech(self, client_id: str, audio_data: bytes):
+        """
+        处理完整的语音数据
+        
+        Args:
+            client_id: 客户端ID
+            audio_data: 完整音频数据
+        """
+        try:
+            # Define callback functions for parallel processing
+            async def stt_callback(audio_bytes: bytes) -> str:
+                """Speech-to-text callback"""
+                return await audio_service.transcribe_audio(audio_bytes)
+            
+            async def ai_callback(text: str) -> str:
+                """AI processing callback"""
+                if not self.chat_engine:
+                    self._initialize_chat_engine()
+                    if not self.chat_engine:
+                        raise Exception("Chat engine not available")
+                
+                # Build chat request
+                chat_request = self._build_chat_request(
+                    content=text,
+                    conversation_id=f"voice_{client_id}",
+                    personality_id=None,
+                    use_tools=True,
+                    stream=False
+                )
+                
+                # Get AI response
+                response = await self.chat_engine.create_chat_completion(chat_request)
+                return response.choices[0].message.content
+            
+            async def tts_callback(text: str) -> bytes:
+                """Text-to-speech callback"""
+                return await audio_service.synthesize_speech(text, voice="alloy")
+            
+            # Process audio in parallel
+            result = await self.audio_processor.process_audio_async(
+                client_id=client_id,
+                audio_data=audio_data,
+                stt_callback=stt_callback,
+                ai_callback=ai_callback,
+                tts_callback=tts_callback
+            )
+            
+            if result.success:
+                # Send text response
+                await websocket_manager.send_message(client_id, {
+                    "type": "text_response",
+                    "text": result.response,
+                    "timestamp": time.time(),
+                    "client_id": client_id
+                })
+                
+                # Send audio response
+                if result.audio_data:
+                    audio_b64 = base64.b64encode(result.audio_data).decode('utf-8')
+                    await websocket_manager.send_message(client_id, {
+                        "type": "voice_response",
+                        "audio_data": audio_b64,
+                        "text": result.response,
+                        "timestamp": time.time(),
+                        "client_id": client_id
+                    })
+                
+                log.info(f"语音处理完成: {client_id}, 处理时间: {result.processing_time:.2f}s")
+            else:
+                log.error(f"语音处理失败: {client_id}, 错误: {result.error}")
+                await self._send_error_response(client_id, f"Speech processing failed: {result.error}")
+                
+        except Exception as e:
+            log.error(f"完整语音处理失败: {client_id}, 错误: {e}")
+            await self._send_error_response(client_id, f"Complete speech processing failed: {str(e)}")
+    
+    async def cleanup_client(self, client_id: str):
+        """清理客户端资源"""
+        try:
+            # Cancel any active processing
+            await self.audio_processor.cancel_processing(client_id)
+            
+            # Clear audio buffer
+            await self.audio_buffer.clear_buffer(client_id)
+            
+            # Clear VAD state
+            self.vad.clear_client_state(client_id)
+            
+            # Clear speech segments
+            if client_id in self.speech_segments:
+                del self.speech_segments[client_id]
+            
+            log.debug(f"客户端资源清理完成: {client_id}")
+            
+        except Exception as e:
+            log.error(f"客户端资源清理失败: {client_id}, 错误: {e}")
+    
+    def get_processing_statistics(self) -> dict:
+        """获取处理统计信息"""
+        return {
+            'vad_stats': self.vad.get_speech_statistics(),
+            'buffer_stats': self.audio_buffer.get_statistics(),
+            'processor_stats': self.audio_processor.get_statistics(),
+            'active_speakers': self.vad.get_active_speakers(),
+            'speech_segments': len(self.speech_segments)
+        }
+    
     async def _handle_clear_conversation(self, client_id: str, message: dict):
         """处理清除对话命令"""
         conversation_id = message.get("conversation_id")
@@ -547,6 +762,118 @@ class RealtimeMessageHandler:
             "timestamp": time.time(),
             "client_id": client_id
         })
+    
+    async def _handle_start_realtime_dialogue(self, client_id: str, message: dict) -> bool:
+        """
+        处理开始实时语音对话
+        
+        Args:
+            client_id: 客户端ID
+            message: 消息内容
+            
+        Returns:
+            bool: 处理是否成功
+        """
+        try:
+            log.info(f"开始实时语音对话: {client_id}")
+            
+            # 初始化客户端的语音状态
+            if client_id not in self.speech_segments:
+                self.speech_segments[client_id] = {
+                    "is_active": True,
+                    "start_time": time.time(),
+                    "last_activity": time.time()
+                }
+            else:
+                self.speech_segments[client_id]["is_active"] = True
+                self.speech_segments[client_id]["start_time"] = time.time()
+                self.speech_segments[client_id]["last_activity"] = time.time()
+            
+            # 启动音频流处理
+            await self._start_audio_stream_processing(client_id)
+            
+            # 发送确认消息
+            await websocket_manager.send_message(client_id, {
+                "type": "realtime_dialogue_started",
+                "message": "实时语音对话已启动，请开始说话",
+                "timestamp": time.time(),
+                "client_id": client_id
+            })
+            
+            log.info(f"实时语音对话启动成功: {client_id}")
+            return True
+            
+        except Exception as e:
+            log.error(f"启动实时语音对话失败: {client_id}, 错误: {e}")
+            await self._send_error_response(client_id, f"Failed to start realtime dialogue: {str(e)}")
+            return False
+    
+    async def _handle_stop_realtime_dialogue(self, client_id: str, message: dict) -> bool:
+        """
+        处理停止实时语音对话
+        
+        Args:
+            client_id: 客户端ID
+            message: 消息内容
+            
+        Returns:
+            bool: 处理是否成功
+        """
+        try:
+            log.info(f"停止实时语音对话: {client_id}")
+            
+            # 停止客户端的语音状态
+            if client_id in self.speech_segments:
+                self.speech_segments[client_id]["is_active"] = False
+                self.speech_segments[client_id]["end_time"] = time.time()
+            
+            # 发送确认消息
+            await websocket_manager.send_message(client_id, {
+                "type": "realtime_dialogue_stopped",
+                "message": "实时语音对话已停止",
+                "timestamp": time.time(),
+                "client_id": client_id
+            })
+            
+            log.info(f"实时语音对话停止成功: {client_id}")
+            return True
+            
+        except Exception as e:
+            log.error(f"停止实时语音对话失败: {client_id}, 错误: {e}")
+            await self._send_error_response(client_id, f"Failed to stop realtime dialogue: {str(e)}")
+            return False
+    
+    async def _start_audio_stream_processing(self, client_id: str):
+        """
+        启动音频流处理
+        
+        Args:
+            client_id: 客户端ID
+        """
+        try:
+            log.info(f"启动音频流处理: {client_id}")
+            
+            # VAD和音频缓冲会在首次使用时自动初始化，无需手动初始化
+            # VoiceActivityDetector.process_audio_stream 会在第一次调用时初始化 speech_segments 和 frame_buffers
+            # AudioStreamBuffer.add_chunk 会在第一次调用时初始化 buffers, locks, sequence_counters, client_metadata
+            # 这样可以确保所有相关字典都被正确初始化，避免初始化不完整导致的 KeyError
+            
+            # 启动并行处理器
+            if client_id not in self.audio_processor.processing_tasks:
+                self.audio_processor.processing_tasks[client_id] = []
+            
+            # 发送音频流启动指令到前端
+            await websocket_manager.send_message(client_id, {
+                "type": "start_audio_stream",
+                "message": "请开始说话，系统正在监听",
+                "timestamp": time.time(),
+                "client_id": client_id
+            })
+            
+            log.info(f"音频流处理启动成功: {client_id}")
+            
+        except Exception as e:
+            log.error(f"启动音频流处理失败: {client_id}, 错误: {e}")
 
 
 # 创建全局实时消息处理器实例
