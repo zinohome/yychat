@@ -51,6 +51,20 @@ from schemas.api_schemas import (
     ToolCallRequest,
     MCPServiceCallRequest
 )
+from schemas.realtime_schemas import (
+    MemoryRequest,
+    MemoryResponse,
+    PersonalityRequest,
+    PersonalityResponse,
+    ToolsRequest,
+    ToolsResponse,
+    ToolExecuteRequest,
+    ToolExecuteResponse,
+    SaveMemoryRequest,
+    SaveMemoryResponse,
+    RealtimeSessionRequest,
+    RealtimeSessionResponse
+)
 
 import warnings
 # 忽略Pydantic的model_fields弃用警告
@@ -1130,6 +1144,225 @@ async def clear_audio_cache(api_key: str = Depends(verify_api_key)):
             status_code=500,
             detail={"error": {"message": f"清空音频缓存失败: {str(e)}", "type": "server_error"}}
         )
+
+
+# ==================== 实时语音API端点 ====================
+
+@app.post("/v1/realtime/token", tags=["Realtime Voice"])
+async def generate_realtime_token(api_key: str = Depends(verify_api_key)):
+    """生成OpenAI Realtime API临时token"""
+    try:
+        from core.realtime_config import realtime_config
+        import time
+        
+        # 生成临时token（这里使用OpenAI API key，实际应用中可能需要生成临时token）
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        if not openai_api_key:
+            raise HTTPException(
+                status_code=500,
+                detail={"error": {"message": "OpenAI API key未配置", "type": "server_error"}}
+            )
+        
+        # 生成token信息
+        token_info = {
+            "token": openai_api_key,
+            "expires_at": int(time.time()) + realtime_config.TOKEN_EXPIRY,
+            "model": realtime_config.VOICE_MODEL,
+            "url": realtime_config.get_realtime_url(),
+            "audio_config": realtime_config.get_audio_config(),
+            "connection_config": realtime_config.get_connection_config()
+        }
+        
+        log.info("实时语音token生成成功")
+        return {
+            "status": "success",
+            "data": token_info
+        }
+        
+    except Exception as e:
+        log.error(f"生成实时语音token失败: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"message": f"生成实时语音token失败: {str(e)}", "type": "server_error"}}
+        )
+
+
+# ==================== 实时语音适配器API端点 ====================
+
+@app.post("/v1/realtime/memory", response_model=MemoryResponse, tags=["Realtime Voice"])
+async def get_realtime_memory(
+    request: MemoryRequest,
+    api_key: str = Depends(verify_api_key)
+):
+    """获取实时语音对话的相关记忆"""
+    try:
+        from adapters.memory_adapter import memory_adapter
+        
+        memories = await memory_adapter.get_relevant_memory(
+            request.conversation_id, 
+            request.query
+        )
+        
+        return MemoryResponse(
+            status="success",
+            data=memories,
+            conversation_id=request.conversation_id,
+            query=request.query
+        )
+        
+    except Exception as e:
+        log.error(f"获取实时语音记忆失败: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"message": f"获取记忆失败: {str(e)}", "type": "server_error"}}
+        )
+
+
+@app.post("/v1/realtime/personality", response_model=PersonalityResponse, tags=["Realtime Voice"])
+async def get_realtime_personality(
+    request: PersonalityRequest,
+    api_key: str = Depends(verify_api_key)
+):
+    """获取实时语音对话的人格配置"""
+    try:
+        from adapters.personality_adapter import personality_adapter
+        
+        personality = personality_adapter.get_personality_for_realtime(
+            request.personality_id
+        )
+        
+        return PersonalityResponse(
+            status="success",
+            data=personality,
+            personality_id=request.personality_id
+        )
+        
+    except Exception as e:
+        log.error(f"获取实时语音人格失败: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"message": f"获取人格失败: {str(e)}", "type": "server_error"}}
+        )
+
+
+@app.post("/v1/realtime/tools", response_model=ToolsResponse, tags=["Realtime Voice"])
+async def get_realtime_tools(
+    request: ToolsRequest,
+    api_key: str = Depends(verify_api_key)
+):
+    """获取实时语音对话的可用工具"""
+    try:
+        from adapters.tool_adapter import tool_adapter
+        
+        tools = await tool_adapter.get_tools_for_realtime(request.personality_id)
+        
+        return ToolsResponse(
+            status="success",
+            data=tools,
+            personality_id=request.personality_id
+        )
+        
+    except Exception as e:
+        log.error(f"获取实时语音工具失败: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"message": f"获取工具失败: {str(e)}", "type": "server_error"}}
+        )
+
+
+@app.post("/v1/realtime/tools/execute", response_model=ToolExecuteResponse, tags=["Realtime Voice"])
+async def execute_realtime_tool(
+    request: ToolExecuteRequest,
+    api_key: str = Depends(verify_api_key)
+):
+    """执行实时语音对话中的工具调用"""
+    try:
+        from adapters.tool_adapter import tool_adapter
+        
+        result = await tool_adapter.execute_tool(
+            request.tool_name, 
+            request.parameters
+        )
+        
+        return ToolExecuteResponse(
+            status="success",
+            data=result,
+            tool_name=request.tool_name
+        )
+        
+    except Exception as e:
+        log.error(f"执行实时语音工具失败: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"message": f"执行工具失败: {str(e)}", "type": "server_error"}}
+        )
+
+
+@app.post("/v1/realtime/memory/save", response_model=SaveMemoryResponse, tags=["Realtime Voice"])
+async def save_realtime_memory(
+    request: SaveMemoryRequest,
+    api_key: str = Depends(verify_api_key)
+):
+    """保存实时语音对话的记忆"""
+    try:
+        from adapters.memory_adapter import memory_adapter
+        
+        success = await memory_adapter.save_memory(
+            request.conversation_id,
+            request.content,
+            request.metadata
+        )
+        
+        return SaveMemoryResponse(
+            status="success" if success else "error",
+            data={"saved": success},
+            conversation_id=request.conversation_id
+        )
+        
+    except Exception as e:
+        log.error(f"保存实时语音记忆失败: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"message": f"保存记忆失败: {str(e)}", "type": "server_error"}}
+        )
+
+
+@app.post("/v1/realtime/session", response_model=RealtimeSessionResponse, tags=["Realtime Voice"])
+async def create_realtime_session(
+    request: RealtimeSessionRequest,
+    api_key: str = Depends(verify_api_key)
+):
+    """创建实时语音会话"""
+    try:
+        from adapters.memory_adapter import memory_adapter
+        from adapters.personality_adapter import personality_adapter
+        from adapters.tool_adapter import tool_adapter
+        
+        # 获取会话信息
+        session_info = {
+            "conversation_id": request.conversation_id,
+            "personality_id": request.personality_id,
+            "session_config": request.session_config or {},
+            "adapters_available": {
+                "memory": memory_adapter.is_available(),
+                "personality": personality_adapter.is_available(),
+                "tools": tool_adapter.is_available()
+            }
+        }
+        
+        return RealtimeSessionResponse(
+            status="success",
+            data=session_info,
+            conversation_id=request.conversation_id
+        )
+        
+    except Exception as e:
+        log.error(f"创建实时语音会话失败: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"message": f"创建会话失败: {str(e)}", "type": "server_error"}}
+        )
+
 
 # 启动服务器
 if __name__ == "__main__":

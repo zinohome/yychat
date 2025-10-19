@@ -120,7 +120,14 @@ class Config:
     
     # 记忆管理配置
     MEMORY_RETRIEVAL_LIMIT = int(os.getenv("MEMORY_RETRIEVAL_LIMIT", "5"))
-    MEMORY_RETRIEVAL_TIMEOUT = float(os.getenv("MEMORY_RETRIEVAL_TIMEOUT", "0.5"))  # 优化后默认0.5秒
+    MEMORY_RETRIEVAL_TIMEOUT = float(os.getenv("MEMORY_RETRIEVAL_TIMEOUT", "0.5"))
+    
+    # 实时语音配置
+    REALTIME_VOICE_ENABLED = os.getenv("REALTIME_VOICE_ENABLED", "true").lower() == "true"
+    REALTIME_VOICE_MODEL = os.getenv("REALTIME_VOICE_MODEL", "gpt-4o-realtime-preview-2024-10-01")
+    REALTIME_VOICE_TOKEN_EXPIRY = int(os.getenv("REALTIME_VOICE_TOKEN_EXPIRY", "3600"))
+    REALTIME_VOICE_SAMPLE_RATE = int(os.getenv("REALTIME_VOICE_SAMPLE_RATE", "24000"))
+    REALTIME_VOICE_CHANNELS = int(os.getenv("REALTIME_VOICE_CHANNELS", "1"))  # 优化后默认0.5秒
     ENABLE_MEMORY_RETRIEVAL = os.getenv("ENABLE_MEMORY_RETRIEVAL", "true").lower() == "true"
     
     # 流式响应优化配置
