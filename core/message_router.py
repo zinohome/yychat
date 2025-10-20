@@ -263,8 +263,61 @@ async def handle_get_status(client_id: str, message: dict):
 async def handle_audio_input(client_id: str, message: dict):
     """处理音频输入消息"""
     try:
-        from core.realtime_handler import realtime_handler
-        return await realtime_handler.handle_message(client_id, message)
+        # 分流：默认走旧STT管线；仅当显式开启实时语音时走realtime
+        scenario = message.get("scenario")
+
+        # 仅当明确是实时通话场景时，才走 realtime
+        if scenario == "voice_call":
+            from core.realtime_handler import realtime_handler
+            return await realtime_handler.handle_message(client_id, message)
+
+        # 旧STT处理：使用AudioService转写并下行结果
+        from services.audio_service import audio_service
+        from core.websocket_manager import websocket_manager
+        import base64
+
+        # 下行：开始处理
+        await websocket_manager.send_message(client_id, {
+            "type": "audio_processing_start",
+            "timestamp": __import__("time").time(),
+        })
+
+        # 兼容多种前端字段：audio_base64 | audio_b64 | audio | data
+        def _pick_base64(m: dict) -> str:
+            cand = (
+                m.get("audio_base64")
+                or m.get("audio_b64")
+                or m.get("audio")
+                or (m.get("data") if isinstance(m.get("data"), str) else None)
+            )
+            if not cand and isinstance(m.get("payload"), dict):
+                p = m["payload"]
+                cand = p.get("audio_base64") or p.get("audio") or p.get("data")
+            return cand
+
+        audio_b64 = _pick_base64(message)
+        if not audio_b64:
+            raise ValueError("缺少音频数据: audio_base64/audio/audio_b64/data")
+
+        # 去掉 dataURI 头部
+        if audio_b64.startswith("data:"):
+            try:
+                audio_b64 = audio_b64.split(",", 1)[1]
+            except Exception:
+                pass
+
+        # 解码并转写
+        audio_bytes = base64.b64decode(audio_b64)
+        text = await audio_service.transcribe_audio(audio_bytes)
+
+        # 下行：转写结果
+        await websocket_manager.send_message(client_id, {
+            "type": "transcription_result",
+            "text": text,
+            "timestamp": __import__("time").time(),
+        })
+
+        return True
     except Exception as e:
         log.error(f"音频输入处理失败: {client_id}, 错误: {e}")
         from core.websocket_manager import websocket_manager
@@ -277,8 +330,13 @@ async def handle_audio_input(client_id: str, message: dict):
 
 async def handle_audio_stream(client_id: str, message: dict):
     """处理音频流消息"""
-    from core.realtime_handler import realtime_handler
-    return await realtime_handler.handle_message(client_id, message)
+    # 流式仅在实时通话中使用；否则直接忽略或返回成功
+    scenario = message.get("scenario")
+    if scenario == "voice_call":
+        from core.realtime_handler import realtime_handler
+        return await realtime_handler.handle_message(client_id, message)
+    # 非实时场景不处理流式音频
+    return True
 
 async def handle_voice_command(client_id: str, message: dict):
     """处理语音命令消息"""

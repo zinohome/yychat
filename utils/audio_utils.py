@@ -12,7 +12,12 @@ from utils.log import log
 try:
     from pydub import AudioSegment
     from pydub.utils import which
-    PYDUB_AVAILABLE = True
+    # 仅当系统存在 ffmpeg/ffprobe 时才启用 pydub 音频处理
+    _ffmpeg = which('ffmpeg')
+    _ffprobe = which('ffprobe')
+    PYDUB_AVAILABLE = bool(_ffmpeg and _ffprobe)
+    if not PYDUB_AVAILABLE:
+        log.warning(f"未检测到ffmpeg/ffprobe，可执行路径: ffmpeg={_ffmpeg}, ffprobe={_ffprobe}，将跳过音频转码/标准化")
 except ImportError:
     PYDUB_AVAILABLE = False
     log.warning("pydub未安装，音频格式转换功能将不可用")
