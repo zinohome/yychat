@@ -5,7 +5,7 @@
 import pytest
 import os
 from unittest.mock import patch
-from core.realtime_config import RealtimeConfig, realtime_config
+from config.realtime_config import RealtimeConfig, realtime_config
 
 
 class TestRealtimeConfig:

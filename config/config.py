@@ -124,7 +124,7 @@ class Config:
     
     # 实时语音配置
     REALTIME_VOICE_ENABLED = os.getenv("REALTIME_VOICE_ENABLED", "true").lower() == "true"
-    REALTIME_VOICE_MODEL = os.getenv("REALTIME_VOICE_MODEL", "gpt-4o-realtime-preview-2024-10-01")
+    REALTIME_VOICE_MODEL = os.getenv("REALTIME_VOICE_MODEL", "gpt-4o-realtime-preview-2024-12-17")
     REALTIME_VOICE_TOKEN_EXPIRY = int(os.getenv("REALTIME_VOICE_TOKEN_EXPIRY", "3600"))
     REALTIME_VOICE_SAMPLE_RATE = int(os.getenv("REALTIME_VOICE_SAMPLE_RATE", "24000"))
     REALTIME_VOICE_CHANNELS = int(os.getenv("REALTIME_VOICE_CHANNELS", "1"))  # 优化后默认0.5秒

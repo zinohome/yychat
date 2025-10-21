@@ -188,7 +188,7 @@ async def lifespan(app: FastAPI):
         
         # 注册消息处理器（延迟注册，避免重复）
         from handlers.text_message_handler import handle_text_message
-        from core.message_router import handle_heartbeat, handle_ping, handle_get_status, handle_audio_input, handle_audio_stream, handle_voice_command, handle_status_query
+        from core.message_router import handle_heartbeat, handle_ping, handle_get_status, handle_audio_input, handle_audio_stream, handle_audio_complete, handle_interrupt, handle_voice_command, handle_status_query
         from core.realtime_handler import realtime_handler
         
         # 重新注册所有处理器
@@ -198,6 +198,8 @@ async def lifespan(app: FastAPI):
         message_router.register_handler("text_message", handle_text_message)
         message_router.register_handler("audio_input", handle_audio_input)
         message_router.register_handler("audio_stream", handle_audio_stream)
+        message_router.register_handler("audio_complete", handle_audio_complete)
+        message_router.register_handler("interrupt", handle_interrupt)
         message_router.register_handler("voice_command", handle_voice_command)
         message_router.register_handler("status_query", handle_status_query)
         message_router.register_handler("interrupt", message_router._handle_interrupt)
@@ -1152,7 +1154,7 @@ async def clear_audio_cache(api_key: str = Depends(verify_api_key)):
 async def generate_realtime_token(api_key: str = Depends(verify_api_key)):
     """生成OpenAI Realtime API临时token"""
     try:
-        from core.realtime_config import realtime_config
+        from config.realtime_config import realtime_config
         import time
         
         # 生成临时token（这里使用OpenAI API key，实际应用中可能需要生成临时token）

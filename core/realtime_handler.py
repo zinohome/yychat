@@ -6,6 +6,9 @@
 import asyncio
 import base64
 import time
+import json
+import os
+import websockets
 from typing import Dict, Any, Optional, List
 from utils.log import log
 from core.websocket_manager import websocket_manager
@@ -17,6 +20,7 @@ from core.parallel_audio_processor import ParallelAudioProcessor
 from services.audio_service import audio_service
 from services.voice_personality_service import voice_personality_service
 from schemas.api_schemas import ChatCompletionRequest
+from config.realtime_config import realtime_config
 
 
 class RealtimeMessageHandler:
@@ -34,6 +38,10 @@ class RealtimeMessageHandler:
         
         # Speech state tracking
         self.speech_segments = {}  # client_id -> speech state
+        
+        # Realtime API connections
+        self.realtime_connections = {}  # client_id -> websocket connection
+        self.realtime_tasks = {}  # client_id -> asyncio task
         
         self._initialize_chat_engine()
         log.info("实时消息处理器初始化成功")
@@ -214,7 +222,7 @@ class RealtimeMessageHandler:
     
     async def _handle_audio_stream_message(self, client_id: str, message: dict) -> bool:
         """
-        处理音频流消息（WebM格式）
+        处理音频流消息（WebM格式）- 使用OpenAI Realtime API
         
         Args:
             client_id: 客户端ID
@@ -242,9 +250,9 @@ class RealtimeMessageHandler:
                 await self._send_error_response(client_id, f"Invalid audio data format: {str(e)}")
                 return False
             
-            # 直接处理完整音频片段（跳过VAD，直接进行STT+AI+TTS）
-            log.info(f"开始处理音频片段: {client_id}")
-            await self._process_complete_speech(client_id, audio_bytes)
+            # 使用OpenAI Realtime API处理音频流
+            log.info(f"开始使用Realtime API处理音频片段: {client_id}")
+            await self._process_realtime_audio(client_id, audio_bytes)
             
             # 发送确认消息
             await websocket_manager.send_message(client_id, {
@@ -827,6 +835,9 @@ class RealtimeMessageHandler:
                 self.speech_segments[client_id]["is_active"] = False
                 self.speech_segments[client_id]["end_time"] = time.time()
             
+            # 清理Realtime API连接
+            await self._cleanup_realtime_connection(client_id)
+            
             # 发送确认消息
             await websocket_manager.send_message(client_id, {
                 "type": "realtime_dialogue_stopped",
@@ -874,6 +885,204 @@ class RealtimeMessageHandler:
             
         except Exception as e:
             log.error(f"启动音频流处理失败: {client_id}, 错误: {e}")
+    
+    async def _process_realtime_audio(self, client_id: str, audio_data: bytes):
+        """
+        使用OpenAI Realtime API处理音频数据
+        
+        Args:
+            client_id: 客户端ID
+            audio_data: 音频数据
+        """
+        try:
+            # 如果客户端没有Realtime连接，创建一个
+            if client_id not in self.realtime_connections:
+                await self._create_realtime_connection(client_id)
+            
+            # 发送音频数据到Realtime API
+            if client_id in self.realtime_connections:
+                websocket = self.realtime_connections[client_id]
+                
+                # 发送音频数据
+                audio_message = {
+                    "type": "conversation.item.input_audio_buffer.append",
+                    "audio": base64.b64encode(audio_data).decode('utf-8')
+                }
+                
+                await websocket.send(json.dumps(audio_message))
+                log.debug(f"发送音频数据到Realtime API: {client_id}")
+            
+        except Exception as e:
+            log.error(f"Realtime API音频处理失败: {client_id}, 错误: {e}")
+            await self._send_error_response(client_id, f"Realtime audio processing failed: {str(e)}")
+    
+    async def _create_realtime_connection(self, client_id: str):
+        """
+        为客户端创建Realtime API连接
+        
+        Args:
+            client_id: 客户端ID
+        """
+        try:
+            # 获取OpenAI API密钥 - 使用config.py中的配置
+            from config.config import Config
+            api_key = Config.OPENAI_API_KEY
+            if not api_key:
+                raise Exception("OpenAI API key not configured")
+            
+            # 构建Realtime API URL
+            url = realtime_config.get_realtime_url()
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "OpenAI-Beta": "realtime=v1"
+            }
+            
+            # 建立WebSocket连接
+            websocket = await websockets.connect(url, extra_headers=headers)
+            self.realtime_connections[client_id] = websocket
+            
+            # 启动消息处理任务
+            task = asyncio.create_task(self._handle_realtime_messages(client_id, websocket))
+            self.realtime_tasks[client_id] = task
+            
+            # 发送会话创建消息
+            session_create = {
+                "type": "session.update",
+                "session": {
+                    "modalities": ["text", "audio"],
+                    "instructions": "你是一个友好的AI助手，可以进行实时语音对话。",
+                    "voice": "alloy",
+                    "input_audio_format": "pcm16",
+                    "output_audio_format": "pcm16",
+                    "input_audio_transcription": {
+                        "model": "whisper-1"
+                    },
+                    "turn_detection": {
+                        "type": "server_vad",
+                        "threshold": 0.5,
+                        "prefix_padding_ms": 300,
+                        "silence_duration_ms": 200
+                    },
+                    "tools": [],
+                    "tool_choice": "auto",
+                    "temperature": 0.8,
+                    "max_response_output_tokens": 4096
+                }
+            }
+            
+            await websocket.send(json.dumps(session_create))
+            log.info(f"Realtime API连接已建立: {client_id}")
+            
+        except Exception as e:
+            log.error(f"创建Realtime API连接失败: {client_id}, 错误: {e}")
+            raise
+    
+    async def _handle_realtime_messages(self, client_id: str, websocket):
+        """
+        处理Realtime API返回的消息
+        
+        Args:
+            client_id: 客户端ID
+            websocket: WebSocket连接
+        """
+        try:
+            async for message in websocket:
+                try:
+                    data = json.loads(message)
+                    await self._process_realtime_response(client_id, data)
+                except json.JSONDecodeError as e:
+                    log.error(f"解析Realtime API消息失败: {e}")
+                except Exception as e:
+                    log.error(f"处理Realtime API消息失败: {e}")
+                    
+        except websockets.exceptions.ConnectionClosed:
+            log.info(f"Realtime API连接已关闭: {client_id}")
+        except Exception as e:
+            log.error(f"Realtime API消息处理异常: {client_id}, 错误: {e}")
+        finally:
+            # 清理连接
+            await self._cleanup_realtime_connection(client_id)
+    
+    async def _process_realtime_response(self, client_id: str, data: dict):
+        """
+        处理Realtime API响应
+        
+        Args:
+            client_id: 客户端ID
+            data: 响应数据
+        """
+        try:
+            message_type = data.get("type")
+            
+            if message_type == "conversation.item.output_audio_buffer.delta":
+                # 处理音频输出
+                audio_data = data.get("delta", "")
+                if audio_data:
+                    # 发送音频数据到前端
+                    await websocket_manager.send_message(client_id, {
+                        "type": "audio_stream",
+                        "audio": audio_data,
+                        "message_id": f"realtime_{client_id}_{int(time.time())}",
+                        "session_id": f"realtime_{client_id}",
+                        "timestamp": time.time()
+                    })
+            
+            elif message_type == "conversation.item.output_text.delta":
+                # 处理文本输出
+                text_delta = data.get("delta", "")
+                if text_delta:
+                    # 发送文本数据到前端
+                    await websocket_manager.send_message(client_id, {
+                        "type": "stream_chunk",
+                        "content": text_delta,
+                        "timestamp": time.time(),
+                        "client_id": client_id
+                    })
+            
+            elif message_type == "conversation.item.output_text.committed":
+                # 处理文本提交
+                text = data.get("text", "")
+                if text:
+                    await websocket_manager.send_message(client_id, {
+                        "type": "stream_end",
+                        "full_content": text,
+                        "timestamp": time.time(),
+                        "client_id": client_id
+                    })
+            
+            elif message_type == "error":
+                # 处理错误
+                error_info = data.get("error", {})
+                error_message = error_info.get("message", "Unknown error")
+                await self._send_error_response(client_id, f"Realtime API error: {error_message}")
+            
+        except Exception as e:
+            log.error(f"处理Realtime API响应失败: {client_id}, 错误: {e}")
+    
+    async def _cleanup_realtime_connection(self, client_id: str):
+        """
+        清理Realtime API连接
+        
+        Args:
+            client_id: 客户端ID
+        """
+        try:
+            # 关闭WebSocket连接
+            if client_id in self.realtime_connections:
+                websocket = self.realtime_connections[client_id]
+                await websocket.close()
+                del self.realtime_connections[client_id]
+            
+            # 取消任务
+            if client_id in self.realtime_tasks:
+                task = self.realtime_tasks[client_id]
+                task.cancel()
+                del self.realtime_tasks[client_id]
+            
+            log.info(f"Realtime API连接已清理: {client_id}")
+            
+        except Exception as e:
+            log.error(f"清理Realtime API连接失败: {client_id}, 错误: {e}")
 
 
 # 创建全局实时消息处理器实例

@@ -11,6 +11,7 @@ class Personality(BaseModel):
     id: str = Field(..., description="人格ID")
     name: str = Field(..., description="人格名称")
     system_prompt: str = Field(..., description="系统提示词")
+    realtime_instructions: str = Field(default="", description="实时语音指令")
     traits: List[str] = Field(default_factory=list, description="人格特质")
     examples: List[str] = Field(default_factory=list, description="对话示例")
     allowed_tools: List[Dict[str, str]] = Field(default_factory=list, description="允许使用的工具及使用条件")

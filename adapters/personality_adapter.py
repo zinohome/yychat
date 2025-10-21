@@ -63,8 +63,19 @@ class PersonalityAdapter:
             Dict[str, Any]: 实时语音格式的人格配置
         """
         try:
-            # 获取系统提示
-            instructions = getattr(personality, 'system_prompt', '') or ''
+            # 获取实时语音指令（优先使用realtime_instructions，否则使用system_prompt）
+            realtime_instructions = getattr(personality, 'realtime_instructions', '')
+            system_prompt = getattr(personality, 'system_prompt', '')
+            
+            if realtime_instructions and realtime_instructions.strip():
+                instructions = realtime_instructions
+                log.debug(f"使用realtime_instructions: {instructions[:100]}...")
+            elif system_prompt and system_prompt.strip():
+                instructions = system_prompt
+                log.debug(f"fallback到system_prompt: {instructions[:100]}...")
+            else:
+                instructions = "你是一个友好的AI助手，可以进行实时语音对话。请用中文回复。"
+                log.debug("使用默认instructions")
             
             # 获取语音设置
             voice_settings = getattr(personality, 'voice_settings', {}) or {}

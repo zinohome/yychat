@@ -266,10 +266,13 @@ async def handle_audio_input(client_id: str, message: dict):
         # 分流：默认走旧STT管线；仅当显式开启实时语音时走realtime
         scenario = message.get("scenario")
 
-        # 仅当明确是实时通话场景时，才走 realtime
+        # 语音通话场景 - 使用专门的语音通话处理器
         if scenario == "voice_call":
-            from core.realtime_handler import realtime_handler
-            return await realtime_handler.handle_message(client_id, message)
+            from core.voice_call_handler import voice_call_handler
+            audio_data = message.get("audio_base64") or message.get("audio") or message.get("data")
+            if not audio_data:
+                raise ValueError("缺少音频数据")
+            return await voice_call_handler.handle_audio_stream(client_id, audio_data)
 
         # 旧STT处理：使用AudioService转写并下行结果
         from services.audio_service import audio_service
@@ -330,18 +333,41 @@ async def handle_audio_input(client_id: str, message: dict):
 
 async def handle_audio_stream(client_id: str, message: dict):
     """处理音频流消息"""
-    # 流式仅在实时通话中使用；否则直接忽略或返回成功
+    # 流式仅在语音通话中使用
     scenario = message.get("scenario")
     if scenario == "voice_call":
-        from core.realtime_handler import realtime_handler
-        return await realtime_handler.handle_message(client_id, message)
-    # 非实时场景不处理流式音频
+        from core.voice_call_handler import voice_call_handler
+        audio_data = message.get("audio_base64") or message.get("audio") or message.get("data")
+        if not audio_data:
+            return False
+        return await voice_call_handler.handle_audio_stream(client_id, audio_data=audio_data, audio_base64=message.get("audio_base64"))
+    # 非语音通话场景不处理流式音频
     return True
+
+async def handle_audio_complete(client_id: str, message: dict):
+    """处理音频完成消息 - 用户停止说话"""
+    from core.voice_call_handler import voice_call_handler
+    return await voice_call_handler.handle_audio_complete(client_id)
+
+async def handle_interrupt(client_id: str, message: dict):
+    """处理打断消息 - 用户开始说话打断AI回复"""
+    from core.voice_call_handler import voice_call_handler
+    return await voice_call_handler.handle_interrupt(client_id)
 
 async def handle_voice_command(client_id: str, message: dict):
     """处理语音命令消息"""
-    from core.realtime_handler import realtime_handler
-    return await realtime_handler.handle_message(client_id, message)
+    command = message.get("command", "")
+    
+    if command == "start_voice_call":
+        from core.voice_call_handler import voice_call_handler
+        return await voice_call_handler.start_voice_call(client_id)
+    elif command == "stop_voice_call":
+        from core.voice_call_handler import voice_call_handler
+        return await voice_call_handler.stop_voice_call(client_id)
+    else:
+        # 其他命令使用旧的处理器
+        from core.realtime_handler import realtime_handler
+        return await realtime_handler.handle_message(client_id, message)
 
 async def handle_status_query(client_id: str, message: dict):
     """处理状态查询消息"""
