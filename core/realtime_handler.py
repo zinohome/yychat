@@ -32,9 +32,12 @@ class RealtimeMessageHandler:
         self._initialized = False
         
         # Initialize VAD and audio processing components
-        self.vad = VoiceActivityDetector(aggressiveness=2, silence_threshold=10)
-        self.audio_buffer = AudioStreamBuffer(max_size=100, chunk_duration=0.1)
-        self.audio_processor = ParallelAudioProcessor(max_workers=4, timeout_seconds=30.0)
+        from config.config import get_config
+        config = get_config()
+        
+        self.vad = VoiceActivityDetector(aggressiveness=2, silence_threshold=config.VAD_SILENCE_THRESHOLD)
+        self.audio_buffer = AudioStreamBuffer(max_size=config.AUDIO_BUFFER_SIZE, chunk_duration=0.1)
+        self.audio_processor = ParallelAudioProcessor(max_workers=config.AUDIO_PROCESSOR_MAX_WORKERS, timeout_seconds=config.AUDIO_PROCESSOR_TIMEOUT)
         
         # Speech state tracking
         self.speech_segments = {}  # client_id -> speech state
@@ -371,7 +374,7 @@ class RealtimeMessageHandler:
         ]
         
         return ChatCompletionRequest(
-            model="gpt-4o-mini",  # 默认模型
+            model=config.DEFAULT_CHAT_MODEL,  # 使用配置的默认模型
             messages=messages,
             conversation_id=conversation_id,
             personality_id=personality_id,

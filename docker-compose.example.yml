@@ -1,0 +1,208 @@
+version: '3.8'
+
+services:
+  yychat:
+    build: .
+    ports:
+      - "${SERVER_PORT:-8000}:8000"
+    environment:
+      # ============================================
+      # 🔑 核心API密钥配置 (必须配置)
+      # ============================================
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      YYCHAT_API_KEY: ${YYCHAT_API_KEY:-yk-1aB2cD3eF4gH5iJ6kL7mN8oP9qR0sT1uV2wX3yZ4}
+      TAVILY_API_KEY: ${TAVILY_API_KEY}
+      
+      # ============================================
+      # 🤖 AI模型配置
+      # ============================================
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_TEMPERATURE: ${OPENAI_TEMPERATURE:-0.75}
+      OPENAI_MAX_TOKENS: ${OPENAI_MAX_TOKENS:-16384}
+      
+      # ============================================
+      # 🧠 记忆管理配置
+      # ============================================
+      MEM0_API_KEY: ${MEM0_API_KEY}
+      MEM0_BASE_URL: ${MEM0_BASE_URL:-http://192.168.66.163:8765}
+      MEMO_USE_LOCAL: ${MEMO_USE_LOCAL:-false}
+      MEM0_LLM_PROVIDER: ${MEM0_LLM_PROVIDER:-openai}
+      MEM0_LLM_CONFIG_MODEL: ${MEM0_LLM_CONFIG_MODEL:-gpt-4.1}
+      MEM0_LLM_CONFIG_MAX_TOKENS: ${MEM0_LLM_CONFIG_MAX_TOKENS:-32768}
+      MEM0_EMBEDDER_MODEL: ${MEM0_EMBEDDER_MODEL:-text-embedding-3-small}
+      
+      # 记忆检索配置
+      MEMORY_RETRIEVAL_LIMIT: ${MEMORY_RETRIEVAL_LIMIT:-5}
+      MEMORY_RETRIEVAL_TIMEOUT: ${MEMORY_RETRIEVAL_TIMEOUT:-0.5}
+      ENABLE_MEMORY_RETRIEVAL: ${ENABLE_MEMORY_RETRIEVAL:-true}
+      MEMORY_SAVE_MODE: ${MEMORY_SAVE_MODE:-both}
+      
+      # ============================================
+      # 💾 数据存储配置
+      # ============================================
+      VECTOR_STORE_PROVIDER: ${VECTOR_STORE_PROVIDER:-chroma}
+      CHROMA_PERSIST_DIRECTORY: ${CHROMA_PERSIST_DIRECTORY:-./chroma_db}
+      CHROMA_COLLECTION_NAME: ${CHROMA_COLLECTION_NAME:-chat_history}
+      
+      # Qdrant配置
+      QDRANT_HOST: ${QDRANT_HOST:-192.168.66.163}
+      QDRANT_PORT: ${QDRANT_PORT:-6333}
+      QDRANT_API_KEY: ${QDRANT_API_KEY}
+      QDRANT_COLLECTION_NAME: ${QDRANT_COLLECTION_NAME:-chat_history}
+      
+      # ============================================
+      # 🚀 服务器配置
+      # ============================================
+      SERVER_HOST: ${SERVER_HOST:-0.0.0.0}
+      SERVER_PORT: ${SERVER_PORT:-8000}
+      
+      # ============================================
+      # 💬 聊天引擎配置
+      # ============================================
+      CHAT_ENGINE: ${CHAT_ENGINE:-chat_engine}
+      DEFAULT_PERSONALITY: ${DEFAULT_PERSONALITY:-health_assistant}
+      STREAM_DEFAULT: ${STREAM_DEFAULT:-true}
+      USE_TOOLS_DEFAULT: ${USE_TOOLS_DEFAULT:-true}
+      
+      # ============================================
+      # 🎤 实时语音配置
+      # ============================================
+      REALTIME_VOICE_ENABLED: ${REALTIME_VOICE_ENABLED:-true}
+      REALTIME_VOICE_MODEL: ${REALTIME_VOICE_MODEL:-gpt-4o-realtime-preview-2024-12-17}
+      REALTIME_VOICE_TOKEN_EXPIRY: ${REALTIME_VOICE_TOKEN_EXPIRY:-3600}
+      REALTIME_VOICE_SAMPLE_RATE: ${REALTIME_VOICE_SAMPLE_RATE:-24000}
+      REALTIME_VOICE_CHANNELS: ${REALTIME_VOICE_CHANNELS:-1}
+      
+      # ============================================
+      # 🎵 音频处理配置
+      # ============================================
+      AUDIO_MAX_SIZE_MB: ${AUDIO_MAX_SIZE_MB:-25}
+      TEXT_MAX_LENGTH: ${TEXT_MAX_LENGTH:-4096}
+      VOICE_SPEED_MIN: ${VOICE_SPEED_MIN:-0.25}
+      VOICE_SPEED_MAX: ${VOICE_SPEED_MAX:-4.0}
+      AUDIO_CHUNK_SIZE_KB: ${AUDIO_CHUNK_SIZE_KB:-32}
+      AUDIO_COMPRESSION_QUALITY: ${AUDIO_COMPRESSION_QUALITY:-70}
+      
+      # ============================================
+      # 🎤 语音和模型默认配置
+      # ============================================
+      DEFAULT_WHISPER_MODEL: ${DEFAULT_WHISPER_MODEL:-whisper-1}
+      DEFAULT_TTS_MODEL: ${DEFAULT_TTS_MODEL:-tts-1}
+      DEFAULT_VOICE: ${DEFAULT_VOICE:-shimmer}
+      DEFAULT_CHAT_MODEL: ${DEFAULT_CHAT_MODEL:-gpt-4o-mini}
+      
+      # ============================================
+      # ⏱️ 超时和重试配置
+      # ============================================
+      CONNECTION_TIMEOUT: ${CONNECTION_TIMEOUT:-30}
+      MAX_RETRY_ATTEMPTS: ${MAX_RETRY_ATTEMPTS:-3}
+      VAD_SILENCE_THRESHOLD: ${VAD_SILENCE_THRESHOLD:-10}
+      AUDIO_BUFFER_SIZE: ${AUDIO_BUFFER_SIZE:-100}
+      AUDIO_PROCESSOR_TIMEOUT: ${AUDIO_PROCESSOR_TIMEOUT:-30.0}
+      AUDIO_PROCESSOR_MAX_WORKERS: ${AUDIO_PROCESSOR_MAX_WORKERS:-4}
+      
+      # ============================================
+      # 🌐 WebSocket和网络配置
+      # ============================================
+      WEBSOCKET_RECEIVE_TIMEOUT: ${WEBSOCKET_RECEIVE_TIMEOUT:-5.0}
+      WEBSOCKET_CONNECT_TIMEOUT: ${WEBSOCKET_CONNECT_TIMEOUT:-10.0}
+      WEBSOCKET_CLOSE_TIMEOUT: ${WEBSOCKET_CLOSE_TIMEOUT:-5.0}
+      WEBSOCKET_PING_TIMEOUT: ${WEBSOCKET_PING_TIMEOUT:-10.0}
+      MAX_CONNECTION_ATTEMPTS: ${MAX_CONNECTION_ATTEMPTS:-5}
+      
+      # ============================================
+      # 🎯 实时语音配置
+      # ============================================
+      REALTIME_CONNECTION_TIMEOUT: ${REALTIME_CONNECTION_TIMEOUT:-30}
+      REALTIME_RECONNECT_ATTEMPTS: ${REALTIME_RECONNECT_ATTEMPTS:-3}
+      REALTIME_IDLE_TIMEOUT_MS: ${REALTIME_IDLE_TIMEOUT_MS:-30000}
+      REALTIME_VOICE_THRESHOLD: ${REALTIME_VOICE_THRESHOLD:-0.2}
+      
+      # ============================================
+      # ⚡ 性能优化配置
+      # ============================================
+      OPENAI_API_TIMEOUT: ${OPENAI_API_TIMEOUT:-30.0}
+      OPENAI_CONNECT_TIMEOUT: ${OPENAI_CONNECT_TIMEOUT:-10.0}
+      OPENAI_READ_TIMEOUT: ${OPENAI_READ_TIMEOUT:-30.0}
+      OPENAI_WRITE_TIMEOUT: ${OPENAI_WRITE_TIMEOUT:-10.0}
+      OPENAI_POOL_TIMEOUT: ${OPENAI_POOL_TIMEOUT:-30.0}
+      OPENAI_API_RETRIES: ${OPENAI_API_RETRIES:-2}
+      
+      # HTTP客户端配置
+      MAX_CONNECTIONS: ${MAX_CONNECTIONS:-100}
+      MAX_KEEPALIVE_CONNECTIONS: ${MAX_KEEPALIVE_CONNECTIONS:-20}
+      KEEPALIVE_EXPIRY: ${KEEPALIVE_EXPIRY:-30}
+      VERIFY_SSL: ${VERIFY_SSL:-false}
+      
+      # 流式响应配置
+      CHUNK_SPLIT_THRESHOLD: ${CHUNK_SPLIT_THRESHOLD:-100}
+      
+      # ============================================
+      # 📊 缓存配置
+      # ============================================
+      USE_REDIS_CACHE: ${USE_REDIS_CACHE:-false}
+      REDIS_HOST: ${REDIS_HOST:-localhost}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_DB: ${REDIS_DB:-0}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_TTL: ${REDIS_TTL:-1800}
+      
+      # 内存缓存配置
+      MEMORY_CACHE_MAXSIZE: ${MEMORY_CACHE_MAXSIZE:-1000}
+      MEMORY_CACHE_TTL: ${MEMORY_CACHE_TTL:-1800}
+      
+      # ============================================
+      # 📈 监控和日志配置
+      # ============================================
+      ENABLE_PERFORMANCE_MONITOR: ${ENABLE_PERFORMANCE_MONITOR:-true}
+      PERFORMANCE_LOG_ENABLED: ${PERFORMANCE_LOG_ENABLED:-true}
+      PERFORMANCE_MAX_HISTORY: ${PERFORMANCE_MAX_HISTORY:-1000}
+      PERFORMANCE_SAMPLING_RATE: ${PERFORMANCE_SAMPLING_RATE:-1.0}
+      
+      # 日志配置
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FILE_NAME: ${LOG_FILE_NAME:-app.log}
+      
+      # ============================================
+      # 📊 测试和调试配置
+      # ============================================
+      TEST_TIMEOUT: ${TEST_TIMEOUT:-30}
+      TEST_MAX_ATTEMPTS: ${TEST_MAX_ATTEMPTS:-5}
+      DEBUG_MODE: ${DEBUG_MODE:-false}
+      VERBOSE_LOGGING: ${VERBOSE_LOGGING:-false}
+      
+      # ============================================
+      # 📋 API元数据配置
+      # ============================================
+      API_TITLE: ${API_TITLE:-YYChat OpenAI兼容API}
+      API_DESCRIPTION: ${API_DESCRIPTION:-YYChat是一个基于OpenAI API的聊天机器人，使用Mem0和ChromaDB进行记忆管理。}
+      API_VERSION: ${API_VERSION:-0.1.1}
+    
+    volumes:
+      - ./logs:/app/logs
+      - ./chroma_db:/app/chroma_db
+      - ./test_db:/app/test_db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Redis缓存服务 (可选)
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    profiles:
+      - redis
+
+volumes:
+  redis_data:

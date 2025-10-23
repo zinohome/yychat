@@ -35,8 +35,8 @@ class RealtimeConfig:
         self.AUDIO_CHANNELS = Config.REALTIME_VOICE_CHANNELS
         
         # 连接配置
-        self.CONNECTION_TIMEOUT = 30  # 30秒
-        self.RECONNECT_ATTEMPTS = 3
+        self.CONNECTION_TIMEOUT = Config.REALTIME_CONNECTION_TIMEOUT
+        self.RECONNECT_ATTEMPTS = Config.REALTIME_RECONNECT_ATTEMPTS
         
         self._validate_config()
         log.info(f"实时语音配置初始化完成 - Realtime API URL: {self.REALTIME_API_URL}")
