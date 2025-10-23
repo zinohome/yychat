@@ -102,7 +102,7 @@ class AudioService:
             else:
                 raise Exception(f"语音转文本处理失败: {e}")
     
-    async def synthesize_speech(self, text: str, voice: str = "alloy", 
+    async def synthesize_speech(self, text: str, voice: str = "shimmer", 
                               model: str = "tts-1", speed: float = 1.0) -> bytes:
         """
         文本转语音
@@ -161,7 +161,7 @@ class AudioService:
             log.error(f"文本转语音失败: {e}")
             raise
 
-    async def synthesize_speech_stream(self, text: str, voice: str = "alloy",
+    async def synthesize_speech_stream(self, text: str, voice: str = "shimmer",
                                        model: str = "tts-1", speed: float = 1.0,
                                        chunk_size: int = 32 * 1024):
         """
@@ -198,7 +198,7 @@ class AudioService:
             log.error(f"文本转语音(流式)失败: {e}")
             raise
 
-    def text_to_speech(self, text: str, voice: str = "alloy", 
+    def text_to_speech(self, text: str, voice: str = "shimmer", 
                         model: str = "tts-1", speed: float = 1.0) -> bytes:
         """
         同步封装：文本转语音（返回原始音频bytes）
@@ -228,7 +228,7 @@ class AudioService:
             log.error(f"文本转语音(同步)失败: {e}")
             raise
 
-    async def text_to_speech_async(self, text: str, voice: str = "alloy", 
+    async def text_to_speech_async(self, text: str, voice: str = "shimmer", 
                                    model: str = "tts-1", speed: float = 1.0) -> bytes:
         """
         异步封装：调用内部 synthesize_speech，返回原始音频bytes。
@@ -254,7 +254,7 @@ class AudioService:
             log.error(f"Base64音频转文本失败: {e}")
             raise
     
-    async def synthesize_speech_base64(self, text: str, voice: str = "alloy", 
+    async def synthesize_speech_base64(self, text: str, voice: str = "shimmer", 
                                      model: str = "tts-1", speed: float = 1.0) -> str:
         """
         文本转语音并返回Base64编码

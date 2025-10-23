@@ -642,7 +642,7 @@ class RealtimeMessageHandler:
             
             async def tts_callback(text: str) -> bytes:
                 """Text-to-speech callback"""
-                return await audio_service.synthesize_speech(text, voice="alloy")
+                return await audio_service.synthesize_speech(text, voice="shimmer")
             
             # Process audio in parallel
             result = await self.audio_processor.process_audio_async(
@@ -951,7 +951,7 @@ class RealtimeMessageHandler:
                 "session": {
                     "modalities": ["text", "audio"],
                     "instructions": "你是一个友好的AI助手，可以进行实时语音对话。",
-                    "voice": "alloy",
+                    "voice": "shimmer",
                     "input_audio_format": "pcm16",
                     "output_audio_format": "pcm16",
                     "input_audio_transcription": {

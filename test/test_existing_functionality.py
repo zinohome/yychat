@@ -58,7 +58,7 @@ class TestExistingFunctionality:
             json={
                 "model": "tts-1",
                 "input": "Hello, this is a test.",
-                "voice": "alloy"
+                "voice": "shimmer"
             },
             headers={"Authorization": f"Bearer {self.api_key}"}
         )

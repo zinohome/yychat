@@ -99,7 +99,7 @@ class RealtimeMessageRouter:
                 "data": {
                     "personality_id": personality_id,
                     "instructions": "你是一个友好的AI助手",
-                    "voice": "alloy",
+                    "voice": "shimmer",
                     "modalities": ["text", "audio"]
                 }
             }

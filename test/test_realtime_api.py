@@ -194,7 +194,7 @@ class TestRealtimeAPI:
         request_data = {
             "conversation_id": "conv_123",
             "personality_id": "personality_123",
-            "session_config": {"voice": "alloy", "speed": 1.0}
+            "session_config": {"voice": "shimmer", "speed": 1.0}
         }
         
         response = self.client.post(

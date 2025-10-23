@@ -200,32 +200,33 @@ class TestVoicePersonalityService(unittest.TestCase):
     def test_get_voice_for_personality_friendly(self):
         """测试获取友好人格的语音"""
         voice = self.service.get_voice_for_personality("friendly")
-        self.assertEqual(voice, "nova", "友好人格应该使用nova语音")
+        self.assertEqual(voice, "shimmer", "友好人格应该使用shimmer语音")
     
     def test_get_voice_for_personality_professional(self):
         """测试获取专业人格的语音"""
         voice = self.service.get_voice_for_personality("professional")
-        self.assertEqual(voice, "onyx", "专业人格应该使用onyx语音")
+        self.assertEqual(voice, "shimmer", "专业人格应该使用shimmer语音")
     
     def test_get_voice_for_personality_health_assistant(self):
         """测试获取健康助手人格的语音"""
         voice = self.service.get_voice_for_personality("health_assistant")
-        self.assertEqual(voice, "alloy", "健康助手人格应该使用alloy语音")
+        self.assertEqual(voice, "shimmer", "健康助手人格应该使用shimmer语音")
     
     def test_get_voice_for_personality_unknown(self):
         """测试获取未知人格的语音"""
         voice = self.service.get_voice_for_personality("unknown_personality")
-        self.assertEqual(voice, "alloy", "未知人格应该使用默认语音")
+        self.assertEqual(voice, "shimmer", "未知人格应该使用默认语音")
     
     def test_get_voice_for_personality_none(self):
         """测试获取None人格的语音"""
         voice = self.service.get_voice_for_personality(None)
-        self.assertEqual(voice, "alloy", "None人格应该使用默认语音")
+        self.assertEqual(voice, "shimmer", "None人格应该使用默认语音")
     
     def test_get_available_voices(self):
         """测试获取可用语音列表"""
         voices = self.service.get_available_voices()
         self.assertIsInstance(voices, dict, "应该返回字典")
+        self.assertIn("shimmer", voices, "应该包含shimmer语音")
         self.assertIn("alloy", voices, "应该包含alloy语音")
         self.assertIn("nova", voices, "应该包含nova语音")
         self.assertIn("onyx", voices, "应该包含onyx语音")
@@ -244,7 +245,7 @@ class TestVoicePersonalityService(unittest.TestCase):
         service.personality_manager = mock_manager
         
         # 测试设置语音
-        result = service.set_voice_for_personality("friendly", "echo")
+        result = service.set_voice_for_personality("friendly", "shimmer")
         self.assertTrue(result, "设置语音应该成功")
     
     def test_set_voice_for_personality_invalid_voice(self):
@@ -254,7 +255,7 @@ class TestVoicePersonalityService(unittest.TestCase):
     
     def test_set_voice_for_personality_invalid_personality(self):
         """测试设置无效人格的语音"""
-        result = self.service.set_voice_for_personality("invalid_personality", "nova")
+        result = self.service.set_voice_for_personality("invalid_personality", "shimmer")
         self.assertFalse(result, "设置无效人格的语音应该失败")
 
 

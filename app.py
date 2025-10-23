@@ -366,7 +366,7 @@ async def create_chat_completion(request: ChatCompletionRequest, api_key: str = 
                                     try:
                                         # 直接调用，不等待完成
                                         tts_manager.process_streaming_text(
-                                            chunk["content"], client_id, session_id, message_id, "alloy"
+                                            chunk["content"], client_id, session_id, message_id, "shimmer"
                                         )
                                     except Exception as tts_err:
                                         log.error(f"Streaming TTS processing failed: {tts_err}")
@@ -404,7 +404,7 @@ async def create_chat_completion(request: ChatCompletionRequest, api_key: str = 
                 # 完成流式TTS处理
                 if tts_manager:
                     try:
-                        await tts_manager.finalize_tts(client_id, session_id, message_id, "alloy")
+                        await tts_manager.finalize_tts(client_id, session_id, message_id, "shimmer")
                         log.info(f"TTS streaming completed: session_id={session_id}, message_id={message_id}, client_id={client_id}")
                     except Exception as tts_err:
                         log.error(f"TTS finalization failed: {tts_err}", exc_info=True)
@@ -983,7 +983,7 @@ async def create_speech(
     try:
         # 验证请求参数
         text = request.get("input", "")
-        voice = request.get("voice", "alloy")
+        voice = request.get("voice", "shimmer")
         model = request.get("model", "tts-1")
         speed = request.get("speed", 1.0)
         response_format = request.get("response_format", "mp3")

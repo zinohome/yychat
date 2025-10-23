@@ -20,7 +20,7 @@ class StreamingTTSManager:
         self.executor = ThreadPoolExecutor(max_workers=3)  # 线程池处理TTS
     
     def process_streaming_text(self, text_chunk: str, client_id: str, 
-                             session_id: str, message_id: str, voice: str = "alloy"):
+                             session_id: str, message_id: str, voice: str = "shimmer"):
         """
         处理流式文本，智能分块并立即TTS（非阻塞）
         
@@ -61,7 +61,7 @@ class StreamingTTSManager:
             # 保留最后一个不完整的分块
             self.pending_segments = [segments[-1]] if segments else []
     
-    async def finalize_tts(self, client_id: str, session_id: str, message_id: str, voice: str = "alloy"):
+    async def finalize_tts(self, client_id: str, session_id: str, message_id: str, voice: str = "shimmer"):
         """
         完成TTS处理，处理剩余的文本
         

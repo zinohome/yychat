@@ -52,10 +52,10 @@ class VoicePersonalityService:
             Dict[str, str]: 人格ID到语音类型的映射
         """
         return {
-            "friendly": "nova",        # 年轻、活泼的声音
-            "professional": "onyx",    # 深沉、权威的声音
-            "health_assistant": "alloy", # 中性、平衡的声音
-            "default": "alloy"         # 默认语音
+            "friendly": "shimmer",        # 柔和、优雅的声音
+            "professional": "shimmer",    # 柔和、优雅的声音
+            "health_assistant": "shimmer", # 柔和、优雅的声音
+            "default": "shimmer"         # 默认语音
         }
     
     def _save_voice_settings(self, voice_mapping: Dict[str, str]):

@@ -41,7 +41,7 @@ class TestRealtimeE2E:
                 json={
                     "conversation_id": self.conversation_id,
                     "personality_id": self.personality_id,
-                    "session_config": {"voice": "alloy", "speed": 1.0}
+                    "session_config": {"voice": "shimmer", "speed": 1.0}
                 },
                 headers={"Authorization": f"Bearer {self.api_key}"}
             )

@@ -29,7 +29,7 @@ class TestPersonalityAdapter:
         # 模拟人格对象
         mock_personality = Mock()
         mock_personality.system_prompt = "你是一个友好的AI助手"
-        mock_personality.voice_settings = {"voice": "alloy", "speed": 1.2}
+        mock_personality.voice_settings = {"voice": "shimmer", "speed": 1.2}
         mock_personality.behavior_patterns = {"tone": "friendly", "style": "conversational"}
         mock_personality.allowed_tools = ["tool1", "tool2"]
         
@@ -41,7 +41,7 @@ class TestPersonalityAdapter:
             result = self.adapter.get_personality_for_realtime("personality_123")
             
             assert result["instructions"] == "你是一个友好的AI助手"
-            assert result["voice"] == "alloy"
+            assert result["voice"] == "shimmer"
             assert result["speed"] == 1.2
             assert result["modalities"] == ["text", "audio"]
             assert result["behavior"]["tone"] == "friendly"
@@ -55,7 +55,7 @@ class TestPersonalityAdapter:
             
             # 应该返回默认人格
             assert result["instructions"] is not None
-            assert result["voice"] == "alloy"
+            assert result["voice"] == "shimmer"
             assert result["modalities"] == ["text", "audio"]
     
     def test_get_personality_for_realtime_personality_not_found(self):
@@ -68,7 +68,7 @@ class TestPersonalityAdapter:
             
             # 应该返回默认人格
             assert result["instructions"] is not None
-            assert result["voice"] == "alloy"
+            assert result["voice"] == "shimmer"
             assert result["modalities"] == ["text", "audio"]
     
     def test_get_personality_for_realtime_exception(self):
@@ -81,7 +81,7 @@ class TestPersonalityAdapter:
             
             # 应该返回默认人格
             assert result["instructions"] is not None
-            assert result["voice"] == "alloy"
+            assert result["voice"] == "shimmer"
             assert result["modalities"] == ["text", "audio"]
     
     def test_convert_to_realtime_format(self):
@@ -89,14 +89,14 @@ class TestPersonalityAdapter:
         # 模拟人格对象
         mock_personality = Mock()
         mock_personality.system_prompt = "测试系统提示"
-        mock_personality.voice_settings = {"voice": "echo", "speed": 1.5}
+        mock_personality.voice_settings = {"voice": "shimmer", "speed": 1.5}
         mock_personality.behavior_patterns = {"tone": "professional", "style": "formal"}
         mock_personality.allowed_tools = ["tool1"]
         
         result = self.adapter._convert_to_realtime_format(mock_personality)
         
         assert result["instructions"] == "测试系统提示"
-        assert result["voice"] == "echo"
+        assert result["voice"] == "shimmer"
         assert result["speed"] == 1.5
         assert result["modalities"] == ["text", "audio"]
         assert result["behavior"]["tone"] == "professional"
@@ -115,7 +115,7 @@ class TestPersonalityAdapter:
         result = self.adapter._convert_to_realtime_format(mock_personality)
         
         assert result["instructions"] == ""
-        assert result["voice"] == "alloy"  # 默认值
+        assert result["voice"] == "shimmer"  # 默认值
         assert result["speed"] == 1.0  # 默认值
         assert result["modalities"] == ["text", "audio"]
         assert result["behavior"]["tone"] == "friendly"  # 默认值
@@ -127,7 +127,7 @@ class TestPersonalityAdapter:
         result = self.adapter._get_default_realtime_personality()
         
         assert result["instructions"] is not None
-        assert result["voice"] == "alloy"
+        assert result["voice"] == "shimmer"
         assert result["speed"] == 1.0
         assert result["modalities"] == ["text", "audio"]
         assert result["behavior"]["tone"] == "friendly"

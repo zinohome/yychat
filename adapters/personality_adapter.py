@@ -115,7 +115,7 @@ class PersonalityAdapter:
         """
         return {
             "instructions": "你是一个友好的AI助手，可以进行实时语音对话。请保持自然、友好的语调，并尽可能简洁地回答问题。",
-            "voice": "alloy",
+            "voice": "shimmer",
             "speed": 1.0,
             "modalities": ["text", "audio"],
             "behavior": {
