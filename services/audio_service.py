@@ -32,7 +32,7 @@ class AudioService:
             log.error(f"音频服务初始化失败: {e}")
             raise
     
-    async def transcribe_audio(self, audio_data: bytes, model: str = None) -> str:
+    async def transcribe_audio(self, audio_data: bytes, model: str = "whisper-1") -> str:
         """
         语音转文本
         
@@ -44,20 +44,16 @@ class AudioService:
             str: 转录的文本
         """
         try:
-            # 使用默认模型如果未指定
-            if model is None:
-                model = config.DEFAULT_WHISPER_MODEL
-                
             # 验证音频数据
             if not audio_data or len(audio_data) == 0:
                 raise ValueError("音频数据不能为空")
             
-            # 检查音频大小限制
-            max_size = config.AUDIO_MAX_SIZE_MB * 1024 * 1024  # 转换为字节
+            # 检查音频大小限制 (25MB for OpenAI)
+            max_size = 25 * 1024 * 1024  # 25MB
             if len(audio_data) > max_size:
                 # 尝试压缩音频
                 log.info(f"音频文件过大 ({len(audio_data) / (1024*1024):.1f}MB)，尝试压缩")
-                audio_data = AudioUtils.compress_audio(audio_data, quality=config.AUDIO_COMPRESSION_QUALITY)
+                audio_data = AudioUtils.compress_audio(audio_data, quality=70)
                 
                 # 再次检查大小
                 if len(audio_data) > max_size:
@@ -106,8 +102,8 @@ class AudioService:
             else:
                 raise Exception(f"语音转文本处理失败: {e}")
     
-    async def synthesize_speech(self, text: str, voice: str = None, 
-                              model: str = None, speed: float = 1.0) -> bytes:
+    async def synthesize_speech(self, text: str, voice: str = "shimmer", 
+                              model: str = "tts-1", speed: float = 1.0) -> bytes:
         """
         文本转语音
         
@@ -121,21 +117,15 @@ class AudioService:
             bytes: 音频数据
         """
         try:
-            # 使用默认值如果未指定
-            if voice is None:
-                voice = config.DEFAULT_VOICE
-            if model is None:
-                model = config.DEFAULT_TTS_MODEL
-                
             # 验证输入参数
             if not text or not text.strip():
                 raise ValueError("文本内容不能为空")
             
-            if len(text) > config.TEXT_MAX_LENGTH:
-                raise ValueError(f"文本长度不能超过{config.TEXT_MAX_LENGTH}个字符")
+            if len(text) > 4096:  # OpenAI TTS限制
+                raise ValueError("文本长度不能超过4096个字符")
             
-            if speed < config.VOICE_SPEED_MIN or speed > config.VOICE_SPEED_MAX:
-                raise ValueError(f"语速必须在{config.VOICE_SPEED_MIN}-{config.VOICE_SPEED_MAX}之间")
+            if speed < 0.25 or speed > 4.0:
+                raise ValueError("语速必须在0.25-4.0之间")
             
             # 检查缓存
             if self.audio_cache is None:
@@ -171,9 +161,9 @@ class AudioService:
             log.error(f"文本转语音失败: {e}")
             raise
 
-    async def synthesize_speech_stream(self, text: str, voice: str = None,
-                                       model: str = None, speed: float = 1.0,
-                                       chunk_size: int = None):
+    async def synthesize_speech_stream(self, text: str, voice: str = "shimmer",
+                                       model: str = "tts-1", speed: float = 1.0,
+                                       chunk_size: int = 32 * 1024):
         """
         文本转语音（分片流式）
         说明：当前SDK未提供真正的流式TTS输出，此实现先整体合成再按字节切片，
@@ -182,21 +172,13 @@ class AudioService:
         Yields:
             bytes: 音频数据分片
         """
-        # 使用默认值如果未指定
-        if voice is None:
-            voice = config.DEFAULT_VOICE
-        if model is None:
-            model = config.DEFAULT_TTS_MODEL
-        if chunk_size is None:
-            chunk_size = config.AUDIO_CHUNK_SIZE_KB * 1024
-            
         # 直接复用参数校验逻辑
         if not text or not text.strip():
             raise ValueError("文本内容不能为空")
-        if len(text) > config.TEXT_MAX_LENGTH:
-            raise ValueError(f"文本长度不能超过{config.TEXT_MAX_LENGTH}个字符")
-        if speed < config.VOICE_SPEED_MIN or speed > config.VOICE_SPEED_MAX:
-            raise ValueError(f"语速必须在{config.VOICE_SPEED_MIN}-{config.VOICE_SPEED_MAX}之间")
+        if len(text) > 4096:
+            raise ValueError("文本长度不能超过4096个字符")
+        if speed < 0.25 or speed > 4.0:
+            raise ValueError("语速必须在0.25-4.0之间")
 
         try:
             # 先整体合成
@@ -216,25 +198,19 @@ class AudioService:
             log.error(f"文本转语音(流式)失败: {e}")
             raise
 
-    def text_to_speech(self, text: str, voice: str = None, 
-                        model: str = None, speed: float = 1.0) -> bytes:
+    def text_to_speech(self, text: str, voice: str = "shimmer", 
+                        model: str = "tts-1", speed: float = 1.0) -> bytes:
         """
         同步封装：文本转语音（返回原始音频bytes）
         与 OpenAI 官方 TTS 指南保持一致，便于在非异步环境复用。
         """
-        # 使用默认值如果未指定
-        if voice is None:
-            voice = config.DEFAULT_VOICE
-        if model is None:
-            model = config.DEFAULT_TTS_MODEL
-            
         # 参数校验与缓存逻辑与异步实现保持一致（此处走直连不使用异步缓存）
         if not text or not text.strip():
             raise ValueError("文本内容不能为空")
-        if len(text) > config.TEXT_MAX_LENGTH:
-            raise ValueError(f"文本长度不能超过{config.TEXT_MAX_LENGTH}个字符")
-        if speed < config.VOICE_SPEED_MIN or speed > config.VOICE_SPEED_MAX:
-            raise ValueError(f"语速必须在{config.VOICE_SPEED_MIN}-{config.VOICE_SPEED_MAX}之间")
+        if len(text) > 4096:
+            raise ValueError("文本长度不能超过4096个字符")
+        if speed < 0.25 or speed > 4.0:
+            raise ValueError("语速必须在0.25-4.0之间")
 
         try:
             start_time = time.time()
@@ -252,14 +228,14 @@ class AudioService:
             log.error(f"文本转语音(同步)失败: {e}")
             raise
 
-    async def text_to_speech_async(self, text: str, voice: str = None, 
-                                   model: str = None, speed: float = 1.0) -> bytes:
+    async def text_to_speech_async(self, text: str, voice: str = "shimmer", 
+                                   model: str = "tts-1", speed: float = 1.0) -> bytes:
         """
         异步封装：调用内部 synthesize_speech，返回原始音频bytes。
         """
         return await self.synthesize_speech(text=text, voice=voice, model=model, speed=speed)
     
-    async def transcribe_audio_base64(self, audio_base64: str, model: str = None) -> str:
+    async def transcribe_audio_base64(self, audio_base64: str, model: str = "whisper-1") -> str:
         """
         从Base64编码的音频数据转文本
         
@@ -278,8 +254,8 @@ class AudioService:
             log.error(f"Base64音频转文本失败: {e}")
             raise
     
-    async def synthesize_speech_base64(self, text: str, voice: str = None, 
-                                     model: str = None, speed: float = 1.0) -> str:
+    async def synthesize_speech_base64(self, text: str, voice: str = "shimmer", 
+                                     model: str = "tts-1", speed: float = 1.0) -> str:
         """
         文本转语音并返回Base64编码
         

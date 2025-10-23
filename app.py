@@ -929,7 +929,7 @@ async def test_audio_endpoint():
 @app.post("/v1/audio/transcriptions", tags=["Audio"])
 async def create_transcription(
     audio_file: UploadFile = File(...),
-    model: str = None,
+    model: str = "whisper-1",
     api_key: str = Depends(verify_api_key)
 ):
     """
@@ -937,10 +937,6 @@ async def create_transcription(
     兼容OpenAI Audio API
     """
     try:
-        # 使用默认模型如果未指定
-        if model is None:
-            model = config.DEFAULT_WHISPER_MODEL
-            
         # 验证文件类型
         if not audio_file.content_type or not audio_file.content_type.startswith('audio/'):
             raise HTTPException(
@@ -987,8 +983,8 @@ async def create_speech(
     try:
         # 验证请求参数
         text = request.get("input", "")
-        voice = request.get("voice", config.DEFAULT_VOICE)
-        model = request.get("model", config.DEFAULT_TTS_MODEL)
+        voice = request.get("voice", "shimmer")
+        model = request.get("model", "tts-1")
         speed = request.get("speed", 1.0)
         response_format = request.get("response_format", "mp3")
         

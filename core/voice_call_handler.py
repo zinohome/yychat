@@ -328,8 +328,8 @@ class VoiceCallHandler:
                 url, 
                 additional_headers=headers,
                 ping_interval=20,  # 保持连接活跃
-                ping_timeout=config.WEBSOCKET_PING_TIMEOUT,   # 快速检测断线
-                close_timeout=config.WEBSOCKET_CLOSE_TIMEOUT,    # 快速关闭
+                ping_timeout=10,   # 快速检测断线
+                close_timeout=5,    # 快速关闭
                 ssl=ssl_context  # 使用自定义SSL上下文（仅用于开发环境）
             )
             self.realtime_connections[client_id] = websocket
@@ -378,10 +378,10 @@ class VoiceCallHandler:
                     "output_audio_format": "pcm16",
                     "turn_detection": {
                         "type": "server_vad",
-                        "threshold": config.REALTIME_VOICE_THRESHOLD,  # 进一步降低阈值，适应低音量环境
+                        "threshold": 0.2,  # 进一步降低阈值，适应低音量环境
                         "prefix_padding_ms": 600,  # 增加前缀填充，捕获更多语音
                         "silence_duration_ms": 400,  # 增加静音时间，确保完整语音
-                        "idle_timeout_ms": config.REALTIME_IDLE_TIMEOUT_MS,  # 添加空闲超时
+                        "idle_timeout_ms": 30000,  # 添加空闲超时
                         "create_response": True,  # 允许创建响应
                         "interrupt_response": True  # 允许打断响应
                     },
