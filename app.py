@@ -16,7 +16,7 @@ from typing import List, Dict, Any, Optional, Union
 import uvicorn
 import os
 # 修改导入路径
-from config.config import get_config
+from config import get_config
 from utils.log import log
 from core.chat_memory import get_async_chat_memory
 from utils.performance import get_performance_monitor, performance_monitor
