@@ -130,6 +130,50 @@ class Config:
     REALTIME_VOICE_CHANNELS = int(os.getenv("REALTIME_VOICE_CHANNELS", "1"))  # 优化后默认0.5秒
     ENABLE_MEMORY_RETRIEVAL = os.getenv("ENABLE_MEMORY_RETRIEVAL", "true").lower() == "true"
     
+    # ============================================
+    # 🎤 音频处理配置
+    # ============================================
+    
+    # STT（语音转文本）配置
+    STT_MAX_AUDIO_SIZE = int(os.getenv("STT_MAX_AUDIO_SIZE", "26214400"))  # 25MB (25 * 1024 * 1024)
+    STT_COMPRESSION_QUALITY = int(os.getenv("STT_COMPRESSION_QUALITY", "70"))  # 压缩质量 (1-100)
+    STT_SAMPLE_RATE = int(os.getenv("STT_SAMPLE_RATE", "16000"))  # 采样率 (Hz)
+    STT_CHANNELS = int(os.getenv("STT_CHANNELS", "1"))  # 声道数 (1=单声道, 2=立体声)
+    STT_SAMPLE_WIDTH = int(os.getenv("STT_SAMPLE_WIDTH", "2"))  # 位深度 (字节数, 2=16位)
+    STT_DEFAULT_MODEL = os.getenv("STT_DEFAULT_MODEL", "whisper-1")  # 默认STT模型
+    STT_RESPONSE_FORMAT = os.getenv("STT_RESPONSE_FORMAT", "text")  # 响应格式 (text, json, verbose_json)
+    
+    # TTS（文本转语音）配置
+    TTS_MAX_TEXT_LENGTH = int(os.getenv("TTS_MAX_TEXT_LENGTH", "4096"))  # 最大文本长度 (字符数)
+    TTS_DEFAULT_VOICE = os.getenv("TTS_DEFAULT_VOICE", "shimmer")  # 默认语音类型
+    TTS_DEFAULT_MODEL = os.getenv("TTS_DEFAULT_MODEL", "tts-1")  # 默认TTS模型 (tts-1, tts-1-hd)
+    TTS_DEFAULT_SPEED = float(os.getenv("TTS_DEFAULT_SPEED", "1.0"))  # 默认语速 (0.25-4.0)
+    TTS_MIN_SPEED = float(os.getenv("TTS_MIN_SPEED", "0.25"))  # 最小语速
+    TTS_MAX_SPEED = float(os.getenv("TTS_MAX_SPEED", "4.0"))  # 最大语速
+    TTS_STREAM_CHUNK_SIZE = int(os.getenv("TTS_STREAM_CHUNK_SIZE", "32768"))  # 流式TTS分块大小 (32KB)
+    TTS_THREAD_POOL_SIZE = int(os.getenv("TTS_THREAD_POOL_SIZE", "3"))  # TTS线程池大小
+    
+    # 音频处理工具配置
+    AUDIO_NORMALIZE_SAMPLE_RATE = int(os.getenv("AUDIO_NORMALIZE_SAMPLE_RATE", "16000"))  # 标准化采样率 (Hz)
+    AUDIO_NORMALIZE_CHANNELS = int(os.getenv("AUDIO_NORMALIZE_CHANNELS", "1"))  # 标准化声道数
+    AUDIO_NORMALIZE_SAMPLE_WIDTH = int(os.getenv("AUDIO_NORMALIZE_SAMPLE_WIDTH", "2"))  # 标准化位深度 (字节数)
+    AUDIO_MIN_WAV_SIZE = int(os.getenv("AUDIO_MIN_WAV_SIZE", "44"))  # 最小WAV文件大小 (字节)
+    
+    # 音频压缩配置
+    AUDIO_COMPRESSION_QUALITY_HIGH = int(os.getenv("AUDIO_COMPRESSION_QUALITY_HIGH", "90"))  # 高质量阈值
+    AUDIO_COMPRESSION_QUALITY_MEDIUM = int(os.getenv("AUDIO_COMPRESSION_QUALITY_MEDIUM", "70"))  # 中等质量阈值
+    AUDIO_COMPRESSION_QUALITY_LOW = int(os.getenv("AUDIO_COMPRESSION_QUALITY_LOW", "50"))  # 低质量阈值
+    AUDIO_COMPRESSION_BITRATE_HIGH = os.getenv("AUDIO_COMPRESSION_BITRATE_HIGH", "128k")  # 高质量比特率
+    AUDIO_COMPRESSION_BITRATE_MEDIUM = os.getenv("AUDIO_COMPRESSION_BITRATE_MEDIUM", "64k")  # 中等质量比特率
+    AUDIO_COMPRESSION_BITRATE_LOW = os.getenv("AUDIO_COMPRESSION_BITRATE_LOW", "32k")  # 低质量比特率
+    
+    # 音频缓存配置
+    AUDIO_CACHE_MAX_SIZE = int(os.getenv("AUDIO_CACHE_MAX_SIZE", "100"))  # 音频缓存最大条目数
+    TTS_CACHE_SIZE = int(os.getenv("TTS_CACHE_SIZE", "50"))  # TTS缓存大小
+    
+    # WebSocket音频配置
+    AUDIO_CHUNK_SIZE = int(os.getenv("AUDIO_CHUNK_SIZE", "1024"))  # WebSocket音频块大小 (字节)
+    
     # 流式响应优化配置
     CHUNK_SPLIT_THRESHOLD = int(os.getenv("CHUNK_SPLIT_THRESHOLD", "100"))
     # Memory配置

@@ -127,7 +127,7 @@ metrics.openai_api_time = time.time() - api_start
 # 发送相同问题3次
 for i in {1..3}; do
   echo "第${i}次请求:"
-  time curl -X POST http://192.168.66.209:9800/v1/chat/completions \
+  time curl -X POST http://192.168.66.145:9800/v1/chat/completions \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer yk-1aB2cD3eF4gH5iJ6kL7mN8oP9qR0sT1uV2wX3yZ4" \
     -d '{"messages": [{"role": "user", "content": "今天天气怎么样？"}], "stream": false}' \
@@ -136,7 +136,7 @@ for i in {1..3}; do
 done
 
 # 查看缓存命中率
-curl http://192.168.66.209:9800/v1/performance/stats \
+curl http://192.168.66.145:9800/v1/performance/stats \
   -H "Authorization: Bearer yk-1aB2cD3eF4gH5iJ6kL7mN8oP9qR0sT1uV2wX3yZ4"
 ```
 
@@ -199,13 +199,13 @@ grep MEMORY_RETRIEVAL_TIMEOUT .env
 ./start_with_venv.sh
 
 # 5. 测试
-curl -X POST http://192.168.66.209:9800/v1/chat/completions \
+curl -X POST http://192.168.66.145:9800/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer yk-xxx" \
   -d '{"messages": [{"role": "user", "content": "测试"}]}'
 
 # 6. 查看Memory时间（应该 < 0.3s）
-curl http://192.168.66.209:9800/v1/performance/recent?count=1 \
+curl http://192.168.66.145:9800/v1/performance/recent?count=1 \
   -H "Authorization: Bearer yk-xxx"
 ```
 
@@ -219,7 +219,7 @@ curl http://192.168.66.209:9800/v1/performance/recent?count=1 \
 
 # 或手动测试
 for i in {1..3}; do
-  curl -X POST http://192.168.66.209:9800/v1/chat/completions \
+  curl -X POST http://192.168.66.145:9800/v1/chat/completions \
     -H "Authorization: Bearer yk-xxx" \
     -d '{"messages": [{"role": "user", "content": "天气"}]}'
   sleep 1
@@ -232,7 +232,7 @@ done
 
 ```bash
 # 查看详细性能数据
-curl http://192.168.66.209:9800/v1/performance/recent?count=5 \
+curl http://192.168.66.145:9800/v1/performance/recent?count=5 \
   -H "Authorization: Bearer yk-xxx" | python3 -m json.tool
 
 # 关注 openai_api_time 字段

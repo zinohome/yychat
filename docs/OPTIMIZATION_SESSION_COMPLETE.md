@@ -171,19 +171,19 @@
 
 #### 查看统计
 ```bash
-curl http://192.168.66.209:9800/v1/performance/stats \
+curl http://192.168.66.145:9800/v1/performance/stats \
   -H "Authorization: Bearer yk-1aB2cD3eF4gH5iJ6kL7mN8oP9qR0sT1uV2wX3yZ4"
 ```
 
 #### 查看最近请求
 ```bash
-curl http://192.168.66.209:9800/v1/performance/recent?count=10 \
+curl http://192.168.66.145:9800/v1/performance/recent?count=10 \
   -H "Authorization: Bearer yk-xxx"
 ```
 
 #### 清除数据
 ```bash
-curl -X DELETE http://192.168.66.209:9800/v1/performance/clear \
+curl -X DELETE http://192.168.66.145:9800/v1/performance/clear \
   -H "Authorization: Bearer yk-xxx"
 ```
 

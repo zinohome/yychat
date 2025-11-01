@@ -109,7 +109,7 @@ GET /v1/performance/stats
 
 ### 1. 获取性能统计
 ```bash
-curl -X GET 'http://192.168.66.209:9800/v1/performance/stats' \
+curl -X GET 'http://192.168.66.145:9800/v1/performance/stats' \
   -H 'Authorization: Bearer yk-1aB2cD3eF4gH5iJ6kL7mN8oP9qR0sT1uV2wX3yZ4'
 ```
 
@@ -117,7 +117,7 @@ curl -X GET 'http://192.168.66.209:9800/v1/performance/stats' \
 
 ### 2. 获取最近N条记录
 ```bash
-curl -X GET 'http://192.168.66.209:9800/v1/performance/recent?count=10' \
+curl -X GET 'http://192.168.66.145:9800/v1/performance/recent?count=10' \
   -H 'Authorization: Bearer yk-1aB2cD3eF4gH5iJ6kL7mN8oP9qR0sT1uV2wX3yZ4'
 ```
 
@@ -125,7 +125,7 @@ curl -X GET 'http://192.168.66.209:9800/v1/performance/recent?count=10' \
 
 ### 3. 清除性能数据
 ```bash
-curl -X DELETE 'http://192.168.66.209:9800/v1/performance/clear' \
+curl -X DELETE 'http://192.168.66.145:9800/v1/performance/clear' \
   -H 'Authorization: Bearer yk-1aB2cD3eF4gH5iJ6kL7mN8oP9qR0sT1uV2wX3yZ4'
 ```
 
@@ -170,7 +170,7 @@ MEMORY_RETRIEVAL_TIMEOUT=0.3
 ```bash
 # 发送相同的问题3次
 for i in {1..3}; do
-  curl -X POST http://192.168.66.209:9800/v1/chat/completions \
+  curl -X POST http://192.168.66.145:9800/v1/chat/completions \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer yk-1aB2cD3eF4gH5iJ6kL7mN8oP9qR0sT1uV2wX3yZ4" \
     -d '{"model": "gpt-4.1", "messages": [{"role": "user", "content": "今天天气怎么样？"}], "stream": false}'

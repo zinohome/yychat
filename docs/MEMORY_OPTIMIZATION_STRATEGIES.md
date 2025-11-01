@@ -368,13 +368,13 @@ MEMORY_RETRIEVAL_LIMIT=3
 ./start_with_venv.sh
 
 # 测试
-curl -X POST http://192.168.66.209:9800/v1/chat/completions \
+curl -X POST http://192.168.66.145:9800/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer yk-..." \
   -d '{"messages": [{"role": "user", "content": "你好"}]}'
 
 # 查看性能
-curl http://192.168.66.209:9800/v1/performance/stats \
+curl http://192.168.66.145:9800/v1/performance/stats \
   -H "Authorization: Bearer yk-..."
 ```
 
@@ -385,7 +385,7 @@ curl http://192.168.66.209:9800/v1/performance/stats \
 # 发送相同问题3次
 for i in {1..3}; do
   echo "第 $i 次请求:"
-  curl -X POST http://192.168.66.209:9800/v1/chat/completions \
+  curl -X POST http://192.168.66.145:9800/v1/chat/completions \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer yk-..." \
     -d '{"messages": [{"role": "user", "content": "今天天气怎么样？"}]}' 2>&1 | grep -o '"model":"[^"]*"'
@@ -393,7 +393,7 @@ for i in {1..3}; do
 done
 
 # 查看缓存命中率
-curl http://192.168.66.209:9800/v1/performance/stats \
+curl http://192.168.66.145:9800/v1/performance/stats \
   -H "Authorization: Bearer yk-..." | grep hit_rate
 ```
 

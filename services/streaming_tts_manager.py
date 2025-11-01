@@ -7,6 +7,9 @@ from services.tts_segmenter import TTSSegmenter
 from services.audio_service import AudioService
 from core.websocket_manager import websocket_manager
 from utils.log import log
+from config.config import get_config
+
+config = get_config()
 
 class StreamingTTSManager:
     """流式TTS管理器"""
@@ -17,10 +20,11 @@ class StreamingTTSManager:
         self.pending_segments = []
         self.is_processing = False
         self.current_seq = 0  # 当前序列号
-        self.executor = ThreadPoolExecutor(max_workers=3)  # 线程池处理TTS
+        # 线程池大小从配置读取
+        self.executor = ThreadPoolExecutor(max_workers=config.TTS_THREAD_POOL_SIZE)
     
     def process_streaming_text(self, text_chunk: str, client_id: str, 
-                             session_id: str, message_id: str, voice: str = "shimmer"):
+                             session_id: str, message_id: str, voice: str = None):
         """
         处理流式文本，智能分块并立即TTS（非阻塞）
         
@@ -29,8 +33,11 @@ class StreamingTTSManager:
             client_id: 客户端ID
             session_id: 会话ID
             message_id: 消息ID
-            voice: 语音类型
+            voice: 语音类型，默认从配置读取
         """
+        # 使用配置的默认语音
+        if voice is None:
+            voice = config.TTS_DEFAULT_VOICE
         # 添加到待处理队列
         self.pending_segments.append(text_chunk)
         current_text = "".join(self.pending_segments)
@@ -61,7 +68,7 @@ class StreamingTTSManager:
             # 保留最后一个不完整的分块
             self.pending_segments = [segments[-1]] if segments else []
     
-    async def finalize_tts(self, client_id: str, session_id: str, message_id: str, voice: str = "shimmer"):
+    async def finalize_tts(self, client_id: str, session_id: str, message_id: str, voice: str = None):
         """
         完成TTS处理，处理剩余的文本
         
@@ -69,8 +76,11 @@ class StreamingTTSManager:
             client_id: 客户端ID
             session_id: 会话ID
             message_id: 消息ID
-            voice: 语音类型
+            voice: 语音类型，默认从配置读取
         """
+        # 使用配置的默认语音
+        if voice is None:
+            voice = config.TTS_DEFAULT_VOICE
         if self.pending_segments:
             remaining_text = "".join(self.pending_segments)
             if remaining_text.strip():

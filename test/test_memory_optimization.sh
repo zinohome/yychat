@@ -16,7 +16,7 @@ if [ -z "$YYCHAT_API_KEY" ]; then
     exit 1
 fi
 
-API_URL="http://192.168.66.209:9800"
+API_URL="http://192.168.66.145:9800"
 
 echo "📋 测试配置:"
 echo "  - Memory超时: $(grep MEMORY_RETRIEVAL_TIMEOUT .env)"

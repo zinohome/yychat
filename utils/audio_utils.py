@@ -8,6 +8,9 @@ import struct
 import io
 from typing import Tuple, Optional
 from utils.log import log
+from config.config import get_config
+
+config = get_config()
 
 try:
     from pydub import AudioSegment
@@ -38,7 +41,9 @@ class AudioUtils:
             bool: 是否为有效音频格式
         """
         try:
-            if not audio_data or len(audio_data) < 44:  # WAV文件最小大小
+            # 使用配置的最小WAV文件大小
+            min_wav_size = config.AUDIO_MIN_WAV_SIZE
+            if not audio_data or len(audio_data) < min_wav_size:
                 return False
             
             # 检查WAV文件头
@@ -114,10 +119,10 @@ class AudioUtils:
             # 使用pydub进行格式转换
             audio_segment = AudioSegment.from_file(io.BytesIO(audio_data), format=input_format)
             
-            # 标准化音频参数 (Whisper推荐参数)
-            audio_segment = audio_segment.set_frame_rate(16000)  # 16kHz
-            audio_segment = audio_segment.set_channels(1)        # 单声道
-            audio_segment = audio_segment.set_sample_width(2)    # 16位
+            # 标准化音频参数（从配置读取）
+            audio_segment = audio_segment.set_frame_rate(config.AUDIO_NORMALIZE_SAMPLE_RATE)
+            audio_segment = audio_segment.set_channels(config.AUDIO_NORMALIZE_CHANNELS)
+            audio_segment = audio_segment.set_sample_width(config.AUDIO_NORMALIZE_SAMPLE_WIDTH)
             
             # 转换格式
             output_buffer = io.BytesIO()
@@ -197,25 +202,25 @@ class AudioUtils:
             # 使用pydub进行音频压缩
             audio_segment = AudioSegment.from_file(io.BytesIO(audio_data), format=input_format)
             
-            # 标准化音频参数
-            audio_segment = audio_segment.set_frame_rate(16000)  # 16kHz
-            audio_segment = audio_segment.set_channels(1)        # 单声道
-            audio_segment = audio_segment.set_sample_width(2)    # 16位
+            # 标准化音频参数（从配置读取）
+            audio_segment = audio_segment.set_frame_rate(config.AUDIO_NORMALIZE_SAMPLE_RATE)
+            audio_segment = audio_segment.set_channels(config.AUDIO_NORMALIZE_CHANNELS)
+            audio_segment = audio_segment.set_sample_width(config.AUDIO_NORMALIZE_SAMPLE_WIDTH)
             
-            # 根据质量参数选择压缩方式
+            # 根据质量参数选择压缩方式（使用配置的阈值和比特率）
             output_buffer = io.BytesIO()
-            if quality >= 90:
+            if quality >= config.AUDIO_COMPRESSION_QUALITY_HIGH:
                 # 高质量：使用WAV格式
                 audio_segment.export(output_buffer, format="wav")
-            elif quality >= 70:
+            elif quality >= config.AUDIO_COMPRESSION_QUALITY_MEDIUM:
                 # 中等质量：使用MP3格式
-                audio_segment.export(output_buffer, format="mp3", bitrate="128k")
-            elif quality >= 50:
+                audio_segment.export(output_buffer, format="mp3", bitrate=config.AUDIO_COMPRESSION_BITRATE_HIGH)
+            elif quality >= config.AUDIO_COMPRESSION_QUALITY_LOW:
                 # 低质量：使用MP3格式
-                audio_segment.export(output_buffer, format="mp3", bitrate="64k")
+                audio_segment.export(output_buffer, format="mp3", bitrate=config.AUDIO_COMPRESSION_BITRATE_MEDIUM)
             else:
                 # 极低质量：使用MP3格式
-                audio_segment.export(output_buffer, format="mp3", bitrate="32k")
+                audio_segment.export(output_buffer, format="mp3", bitrate=config.AUDIO_COMPRESSION_BITRATE_LOW)
             
             compressed_data = output_buffer.getvalue()
             
@@ -267,10 +272,10 @@ class AudioUtils:
             
             log.info(f"音频标准化前: {original_info['frame_rate']}Hz, {original_info['channels']}声道, {original_info['sample_width']}位")
             
-            # 标准化音频参数 (Whisper推荐参数)
-            audio_segment = audio_segment.set_frame_rate(16000)  # 16kHz
-            audio_segment = audio_segment.set_channels(1)        # 单声道
-            audio_segment = audio_segment.set_sample_width(2)    # 16位
+            # 标准化音频参数（从配置读取）
+            audio_segment = audio_segment.set_frame_rate(config.AUDIO_NORMALIZE_SAMPLE_RATE)
+            audio_segment = audio_segment.set_channels(config.AUDIO_NORMALIZE_CHANNELS)
+            audio_segment = audio_segment.set_sample_width(config.AUDIO_NORMALIZE_SAMPLE_WIDTH)
             
             # 音量标准化 (归一化到-20dB)
             audio_segment = audio_segment.normalize()

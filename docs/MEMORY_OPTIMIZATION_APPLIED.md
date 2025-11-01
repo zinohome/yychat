@@ -58,7 +58,7 @@ MEMORY_CACHE_TTL="1800"          # ⬆️ 缓存增到30分钟（更持久）
 
 #### 测试1: 基本响应
 ```bash
-curl -X POST http://192.168.66.209:9800/v1/chat/completions \
+curl -X POST http://192.168.66.145:9800/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer yk-1aB2cD3eF4gH5iJ6kL7mN8oP9qR0sT1uV2wX3yZ4" \
   -d '{"messages": [{"role": "user", "content": "你好"}]}'
@@ -73,7 +73,7 @@ curl -X POST http://192.168.66.209:9800/v1/chat/completions \
 # 发送相同问题3次
 for i in {1..3}; do
   echo "第 $i 次请求:"
-  time curl -X POST http://192.168.66.209:9800/v1/chat/completions \
+  time curl -X POST http://192.168.66.145:9800/v1/chat/completions \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer yk-1aB2cD3eF4gH5iJ6kL7mN8oP9qR0sT1uV2wX3yZ4" \
     -d '{"messages": [{"role": "user", "content": "今天天气怎么样？"}]}' \
@@ -91,7 +91,7 @@ done
 
 #### 测试3: 查看性能统计
 ```bash
-curl http://192.168.66.209:9800/v1/performance/stats \
+curl http://192.168.66.145:9800/v1/performance/stats \
   -H "Authorization: Bearer yk-1aB2cD3eF4gH5iJ6kL7mN8oP9qR0sT1uV2wX3yZ4"
 ```
 

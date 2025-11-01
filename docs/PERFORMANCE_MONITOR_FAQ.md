@@ -34,13 +34,13 @@ GET /v1/performance/recent?count=2
 #### 方案1: 发送测试请求（立即生效）
 ```bash
 # 发送几个测试请求生成数据
-curl -X POST http://192.168.66.209:9800/v1/chat/completions \
+curl -X POST http://192.168.66.145:9800/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer yk-1aB2cD3eF4gH5iJ6kL7mN8oP9qR0sT1uV2wX3yZ4" \
   -d '{"messages": [{"role": "user", "content": "测试"}], "stream": false}'
 
 # 再查询
-curl http://192.168.66.209:9800/v1/performance/stats \
+curl http://192.168.66.145:9800/v1/performance/stats \
   -H "Authorization: Bearer yk-1aB2cD3eF4gH5iJ6kL7mN8oP9qR0sT1uV2wX3yZ4"
 ```
 
@@ -115,7 +115,7 @@ grep MEMORY_RETRIEVAL_TIMEOUT .env
 tail -f logs/app.log | grep -E "PERF|Memory|OpenAI"
 
 # 3. 查看最近请求详情
-curl http://192.168.66.209:9800/v1/performance/recent?count=3 \
+curl http://192.168.66.145:9800/v1/performance/recent?count=3 \
   -H "Authorization: Bearer yk-xxx"
 ```
 
@@ -179,7 +179,7 @@ echo "PERFORMANCE_LOG_ENABLED=true" >> .env
 #### 验证
 ```bash
 # 发送请求
-curl -X POST http://192.168.66.209:9800/v1/chat/completions \
+curl -X POST http://192.168.66.145:9800/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer yk-xxx" \
   -d '{"messages": [{"role": "user", "content": "测试"}], "stream": false}'
@@ -219,7 +219,7 @@ tail -5 logs/app.log | grep PERF
 **发送相同内容3次**：
 ```bash
 for i in {1..3}; do
-  curl -X POST http://192.168.66.209:9800/v1/chat/completions \
+  curl -X POST http://192.168.66.145:9800/v1/chat/completions \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer yk-xxx" \
     -d '{"messages": [{"role": "user", "content": "今天天气怎么样？"}], "stream": false}'
@@ -227,7 +227,7 @@ for i in {1..3}; do
 done
 
 # 查看缓存命中率（应该 > 60%）
-curl http://192.168.66.209:9800/v1/performance/stats \
+curl http://192.168.66.145:9800/v1/performance/stats \
   -H "Authorization: Bearer yk-xxx" | grep hit_rate
 ```
 
@@ -243,7 +243,7 @@ curl http://192.168.66.209:9800/v1/performance/stats \
 
 ### API方式
 ```bash
-curl -X DELETE http://192.168.66.209:9800/v1/performance/clear \
+curl -X DELETE http://192.168.66.145:9800/v1/performance/clear \
   -H "Authorization: Bearer yk-xxx"
 ```
 
@@ -279,7 +279,7 @@ curl -X DELETE http://192.168.66.209:9800/v1/performance/clear \
 #### 方案1: 使用统计API
 ```bash
 # 查看所有数据的统计（包含时间范围）
-curl http://192.168.66.209:9800/v1/performance/stats \
+curl http://192.168.66.145:9800/v1/performance/stats \
   -H "Authorization: Bearer yk-xxx"
 
 # 返回包含 time_range:
@@ -296,7 +296,7 @@ curl http://192.168.66.209:9800/v1/performance/stats \
 #### 方案2: 导出数据分析
 ```bash
 # 获取最近所有数据
-curl http://192.168.66.209:9800/v1/performance/recent?count=1000 \
+curl http://192.168.66.145:9800/v1/performance/recent?count=1000 \
   -H "Authorization: Bearer yk-xxx" > performance_data.json
 
 # 用Python分析
@@ -333,7 +333,7 @@ EOF
 
 5. ✅ **API是否可访问？**
    ```bash
-   curl http://192.168.66.209:9800/v1/performance/stats \
+   curl http://192.168.66.145:9800/v1/performance/stats \
      -H "Authorization: Bearer yk-xxx"
    ```
 
@@ -344,14 +344,14 @@ EOF
 ### 日常监控
 ```bash
 # 每天查看一次统计
-curl http://192.168.66.209:9800/v1/performance/stats \
+curl http://192.168.66.145:9800/v1/performance/stats \
   -H "Authorization: Bearer $YYCHAT_API_KEY"
 ```
 
 ### 问题诊断
 ```bash
 # 查看最近的详细数据
-curl http://192.168.66.209:9800/v1/performance/recent?count=10 \
+curl http://192.168.66.145:9800/v1/performance/recent?count=10 \
   -H "Authorization: Bearer $YYCHAT_API_KEY"
 ```
 
@@ -359,7 +359,7 @@ curl http://192.168.66.209:9800/v1/performance/recent?count=10 \
 ```bash
 # 发送相同请求验证缓存
 for i in {1..3}; do
-  curl -X POST http://192.168.66.209:9800/v1/chat/completions \
+  curl -X POST http://192.168.66.145:9800/v1/chat/completions \
     -H "Authorization: Bearer $YYCHAT_API_KEY" \
     -d '{"messages": [{"role": "user", "content": "测试缓存"}]}'
   sleep 1
