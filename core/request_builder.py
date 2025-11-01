@@ -31,8 +31,13 @@ def build_request_params(
             # 预先设置 tools
             params["tools"] = tools_schema
         if force_tool_from_message and messages:
-            last_msg = messages[-1].get("content", "")
-            tool_choice = select_tool_choice(last_msg, allowed_tool_names)
+            # 只检查用户消息（role='user'），避免AI回复触发工具调用
+            user_messages = [msg for msg in messages if msg.get("role") == "user"]
+            if user_messages:
+                last_user_msg = user_messages[-1].get("content", "")
+                tool_choice = select_tool_choice(last_user_msg, allowed_tool_names)
+            else:
+                tool_choice = None
             if tool_choice:
                 params["tool_choice"] = tool_choice
                 # 安全兜底：若被选择的工具不在 tools 列表，动态补齐其 schema

@@ -1,4 +1,5 @@
 from typing import List, Dict, Any, Optional
+import re
 
 
 TIME_TOOL_NAME = "gettime"
@@ -12,12 +13,13 @@ TIME_KEYWORDS = [
 ]
 
 WEATHER_KEYWORDS = [
-    # 中文
-    "天气", "温度", "下雨", "晴天", "阴天", "多云", "雨", "雪", "风", "湿度", "气压",
-    "天气预报", "气温", "降雨", "降雪", "刮风", "雾霾", "空气质量",
-    # 英文
-    "weather", "temperature", "rain", "sunny", "cloudy", "snow", "wind", "humidity", "pressure",
-    "forecast", "climate", "precipitation", "storm", "fog", "air quality"
+    # 中文 - 更精确的关键词，避免误触发
+    "天气", "天气预报", "今天天气", "明天天气", "查询天气", "天气怎么样", "天气如何",
+    "气温", "多少度", "温度多少", 
+    "下雨", "晴天", "阴天", "多云", "降雨", "降雪", "刮风", "雾霾",
+    # 英文 - 完整短语匹配，避免单词误匹配
+    "what's the weather", "weather forecast", "weather today", "weather tomorrow",
+    "how's the weather", "weather condition", "weather report"
 ]
 
 
@@ -41,13 +43,34 @@ def select_tool_choice(last_message: str,
     
     注意：只有当工具在 allowed_tool_names 中时才会返回 tool_choice
     这样可以避免 OpenAI API 报错：tool_choice 指定的工具不在 tools 列表中
+    
+    改进：使用更精确的关键词匹配，避免误触发
     """
     if not last_message:
         return None
+    
     msg = last_message.lower()
+    msg_cleaned = msg.strip()
     
     # 优先检查天气关键词（天气查询优先级更高）
-    if any(k in msg for k in WEATHER_KEYWORDS):
+    # 使用更精确的匹配：检查完整短语或短语边界
+    weather_triggered = False
+    for keyword in WEATHER_KEYWORDS:
+        # 检查完整短语匹配或短语边界匹配（避免单词误匹配）
+        if keyword in msg_cleaned:
+            # 对于中文关键词，检查是否在句子边界或前后是标点/空格
+            # 对于英文短语，直接检查是否包含
+            if len(keyword) <= 2:  # 单个或两个字符的关键词
+                # 检查前后是否为标点、空格或中文字符边界
+                pattern = rf'(?:^|[^\w]){re.escape(keyword)}(?:[^\w]|$)'
+                if re.search(pattern, msg_cleaned):
+                    weather_triggered = True
+                    break
+            else:  # 短语关键词，直接匹配
+                weather_triggered = True
+                break
+    
+    if weather_triggered:
         # 只有当没有限制或者 maps_weather 在允许列表中时才强制使用
         if not allowed_tool_names:
             # 没有限制，可以使用
@@ -60,7 +83,20 @@ def select_tool_choice(last_message: str,
             return None
     
     # 然后检查时间关键词
-    if any(k in msg for k in TIME_KEYWORDS):
+    time_triggered = False
+    for keyword in TIME_KEYWORDS:
+        # 对于中文关键词，使用更精确的匹配
+        if keyword in msg_cleaned:
+            if len(keyword) <= 2:  # 单个或两个字符的关键词
+                pattern = rf'(?:^|[^\w]){re.escape(keyword)}(?:[^\w]|$)'
+                if re.search(pattern, msg_cleaned):
+                    time_triggered = True
+                    break
+            else:
+                time_triggered = True
+                break
+    
+    if time_triggered:
         # 只有当没有限制或者 gettime 在允许列表中时才强制使用
         if not allowed_tool_names:
             # 没有限制，可以使用
