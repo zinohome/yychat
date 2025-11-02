@@ -38,6 +38,10 @@ class RealtimeConfig:
         self.CONNECTION_TIMEOUT = 30  # 30秒
         self.RECONNECT_ATTEMPTS = 3
         
+        # 新增：语音实时对话文本显示配置
+        self.VOICE_CALL_SEND_TRANSCRIPTION = os.getenv('VOICE_CALL_SEND_TRANSCRIPTION', 'true').lower() == 'true'
+        self.VOICE_CALL_INCLUDE_ASSISTANT_TEXT = os.getenv('VOICE_CALL_INCLUDE_ASSISTANT_TEXT', 'true').lower() == 'true'
+        
         self._validate_config()
         log.info(f"实时语音配置初始化完成 - Realtime API URL: {self.REALTIME_API_URL}")
     

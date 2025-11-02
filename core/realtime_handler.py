@@ -187,13 +187,16 @@ class RealtimeMessageHandler:
             # 语音转文本
             transcribed_text = await audio_service.transcribe_audio(audio_data)
             
-            # 发送转录结果
-            await websocket_manager.send_message(client_id, {
-                "type": "transcription_result",
-                "text": transcribed_text,
-                "timestamp": time.time(),
-                "client_id": client_id
-            })
+            # 发送转录结果（添加场景字段）
+            if realtime_config.VOICE_CALL_SEND_TRANSCRIPTION:
+                await websocket_manager.send_message(client_id, {
+                    "type": "transcription_result",
+                    "text": transcribed_text,
+                    "timestamp": time.time(),
+                    "client_id": client_id,
+                    "scenario": "voice_call",  # 新增：标识场景类型
+                    "message_id": f"voice-call-{client_id}-{int(time.time() * 1000)}"  # 可选：消息ID
+                })
             
             # 如果启用了自动回复，继续处理文本（方案B默认关闭）
             from config.config import get_config

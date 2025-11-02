@@ -318,6 +318,7 @@ async def handle_audio_input(client_id: str, message: dict):
             "type": "transcription_result",
             "text": text,
             "timestamp": __import__("time").time(),
+            "scenario": "voice_recording",  # 新增：标识场景类型（录音聊天）
         })
 
         return True
