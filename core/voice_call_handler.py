@@ -377,6 +377,7 @@ class VoiceCallHandler:
                     "modalities": ["audio", "text"],
                     "instructions": instructions,
                     "voice": "shimmer",
+                    "speed": 1.05,  # 🔧 稍微加快语速（1.0是正常速度，1.1是快10%）
                     "input_audio_format": "pcm16",
                     "output_audio_format": "pcm16",
                     "turn_detection": {
@@ -504,13 +505,48 @@ class VoiceCallHandler:
                 # 处理音频输出 - 语音通话的核心功能
                 audio_data = data.get("delta", "")
                 if audio_data:
-                    log.info(f"🎵 收到AI音频数据: {client_id}, 数据大小: {len(audio_data)}")
+                    # 🔧 提取顺序相关信息
+                    item_id = data.get("item_id")  # OpenAI提供的item_id（同一响应下所有音频片段共享）
+                    event_id = data.get("event_id")  # OpenAI提供的event_id（每个消息唯一）
+                    output_index = data.get("output_index", 0)  # OpenAI提供的output_index
+                    content_index = data.get("content_index", 0)  # OpenAI提供的content_index
+                    sequence_number = data.get("sequence_number")  # 🔧 OpenAI提供的sequence_number（用于排序！）
+                    
+                    # 🔧 初始化客户端状态
+                    if client_id not in self.active_calls:
+                        self.active_calls[client_id] = {}
+                    
+                    # 🔧 优先使用OpenAI的sequence_number，如果没有则使用后端生成的序列号
+                    if sequence_number is not None:
+                        # 使用OpenAI提供的sequence_number（最可靠！）
+                        seq = sequence_number
+                        log.info(f"🎵 收到AI音频数据: {client_id}, 数据大小: {len(audio_data)}, sequence_number={seq}, item_id={item_id}, event_id={event_id}")
+                    else:
+                        # 如果OpenAI没有提供sequence_number，使用后端生成的序列号（按item_id管理）
+                        item_seq_key = f"audio_seq_{item_id}"
+                        if item_seq_key not in self.active_calls[client_id]:
+                            self.active_calls[client_id][item_seq_key] = 0
+                            log.info(f"🔍 [新响应项] item_id={item_id}, 重置序列号")
+                        else:
+                            self.active_calls[client_id][item_seq_key] += 1
+                        
+                        seq = self.active_calls[client_id][item_seq_key]
+                        log.info(f"🎵 收到AI音频数据: {client_id}, 数据大小: {len(audio_data)}, seq={seq} (后端生成), item_id={item_id}, event_id={event_id}, sequence_number={sequence_number}")
+                    
+                    receive_timestamp = time.time()
+                    
                     await websocket_manager.send_message(client_id, {
                         "type": "audio_stream",
                         "audio": audio_data,
-                        "message_id": f"voice_call_{client_id}_{int(time.time())}",
+                        "message_id": f"voice_call_{client_id}_{int(receive_timestamp)}",
                         "session_id": f"voice_call_{client_id}",
-                        "timestamp": time.time()
+                        "timestamp": receive_timestamp,  # 使用接收时间戳（作为辅助排序）
+                        "seq": seq,  # 🔧 优先使用OpenAI的sequence_number，否则使用后端生成的序列号
+                        "sequence_number": sequence_number,  # 🔧 传递OpenAI的sequence_number（如果存在）
+                        "item_id": item_id,  # 🔧 传递item_id（用于分组）
+                        "event_id": event_id,  # 🔧 传递event_id（用于调试）
+                        "output_index": output_index,  # 🔧 传递output_index
+                        "content_index": content_index  # 🔧 传递content_index
                     })
             
             # 🔧 关键修复：移除所有delta增量处理，只处理完成消息
@@ -728,6 +764,13 @@ class VoiceCallHandler:
             # 清理AI回复文本相关数据
             if client_id in self._assistant_text_sent:
                 del self._assistant_text_sent[client_id]
+            
+            # 🔧 清理序列号状态（清理所有item_id的序列号）
+            if client_id in self.active_calls:
+                # 清理所有以audio_seq_开头的键（序列号状态）
+                keys_to_remove = [k for k in self.active_calls[client_id].keys() if k.startswith("audio_seq_")]
+                for key in keys_to_remove:
+                    del self.active_calls[client_id][key]
             
             log.info(f"连接已清理: {client_id}")
             
