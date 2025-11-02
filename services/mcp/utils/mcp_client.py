@@ -216,10 +216,12 @@ class McpSseClient(McpClient):
                         break
                     match sse.event:
                         case "endpoint":
-                            # 处理服务端返回的工具调用endpoint
+                            # 🔧 修复：服务端返回的endpoint用于工具调用（POST请求）
+                            # SSE连接使用mcp.json中的URL（GET请求），工具调用使用服务端返回的endpoint（POST请求）
+                            # _merge_endpoint_url会确保endpoint URL包含key参数
                             log.debug(f"{self.name} - 收到工具调用endpoint: {sse.data}")
                             self.endpoint_url = self._merge_endpoint_url(sse.data)
-                            log.debug(f"{self.name} - 工具调用URL构建完成: {self.endpoint_url}")
+                            log.debug(f"{self.name} - 工具调用URL构建完成（已确保包含key参数）: {self.endpoint_url}")
                             self._connected.set()
                         case "message":
                             message = json.loads(sse.data)
@@ -315,24 +317,36 @@ class McpSseClient(McpClient):
             log.debug(f"{self.name} - 工具调用URL验证通过: {self.endpoint_url}")
 
     def send_message(self, data: dict) -> dict:
-        if not self.endpoint_url:
+        # 🔧 关键修复：工具调用使用服务端返回的endpoint URL，但要确保包含key参数
+        # SSE连接：使用mcp.json中的URL（/sse?key=xxx） - GET请求
+        # 工具调用：使用服务端返回的endpoint（/mcp/message?sessionId=xxx） - POST请求
+        # 必须确保endpoint URL包含key参数，否则会报400错误
+        
+        # 检查SSE连接是否建立
+        if not self._connected.is_set():
             if self._thread_exception:
                 raise ConnectionError(f"{self.name} - MCP Server connection failed: {self._thread_exception}")
             else:
-                raise RuntimeError(f"{self.name} - Please call connect() first")
+                raise RuntimeError(f"{self.name} - Please call connect() first, SSE connection not established")
         
-        # 最终保障：在发送前再次验证URL
+        # 🔧 修复：使用服务端返回的endpoint_url，但要验证它包含key参数
+        if not self.endpoint_url:
+            log.error(f"{self.name} - 工具调用URL未设置，SSE连接可能未收到endpoint事件")
+            raise RuntimeError(f"{self.name} - Tool call endpoint not available, please wait for SSE connection to establish")
+        
+        # 最终保障：确保endpoint URL包含key参数
         self._validate_and_fix_endpoint_url()
+        tool_call_url = self.endpoint_url
         
         log.debug(f"{self.name} - 发送工具调用请求: {data}")
-        log.debug(f"{self.name} - 使用工具调用URL: {self.endpoint_url}")
+        log.debug(f"{self.name} - 使用工具调用URL（服务端返回的endpoint，已确保包含key参数）: {tool_call_url}")
         
         # 添加重试机制
         max_retries = 2
         for attempt in range(max_retries + 1):
             try:
                 response = self.client.post(
-                    url=self.endpoint_url,
+                    url=tool_call_url,
                     json=data,
                     headers={"Content-Type": "application/json"},
                     timeout=httpx.Timeout(self.timeout),
@@ -348,9 +362,10 @@ class McpSseClient(McpClient):
             except (httpx.HTTPStatusError, httpx.RequestError) as e:
                 if attempt < max_retries:
                     log.warning(f"{self.name} - 请求失败，重试 {attempt + 1}/{max_retries}: {e}")
-                    # 重新验证URL
+                    # 重新验证URL，确保key参数存在
                     self._validate_and_fix_endpoint_url()
-                    log.debug(f"{self.name} - 重试URL: {self.endpoint_url}")
+                    tool_call_url = self.endpoint_url
+                    log.debug(f"{self.name} - 重试URL（服务端返回的endpoint，已确保包含key参数）: {tool_call_url}")
                     continue
                 else:
                     log.error(f"{self.name} - 所有重试失败: {e}")
