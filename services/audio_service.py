@@ -78,13 +78,20 @@ class AudioService:
             audio_file = io.BytesIO(audio_data)
             audio_file.name = "audio.wav"
             
-            # 调用OpenAI Whisper API（使用配置的响应格式）
+            # 调用OpenAI Whisper API（使用配置的响应格式和语言）
             start_time = time.time()
-            response = self.openai_client.audio.transcriptions.create(
-                model=model,
-                file=audio_file,
-                response_format=config.STT_RESPONSE_FORMAT
-            )
+            # 构建API调用参数
+            api_params = {
+                "model": model,
+                "file": audio_file,
+                "response_format": config.STT_RESPONSE_FORMAT
+            }
+            # 如果配置了语言，添加语言参数（确保输出简体中文）
+            if hasattr(config, 'STT_LANGUAGE') and config.STT_LANGUAGE:
+                api_params["language"] = config.STT_LANGUAGE
+                log.debug(f"使用指定语言进行转录: {config.STT_LANGUAGE}")
+            
+            response = self.openai_client.audio.transcriptions.create(**api_params)
             processing_time = time.time() - start_time
             
             # 获取转录结果

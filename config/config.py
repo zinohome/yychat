@@ -148,6 +148,7 @@ class Config:
     STT_SAMPLE_WIDTH = int(os.getenv("STT_SAMPLE_WIDTH", "2"))  # 位深度 (字节数, 2=16位)
     STT_DEFAULT_MODEL = os.getenv("STT_DEFAULT_MODEL", "whisper-1")  # 默认STT模型
     STT_RESPONSE_FORMAT = os.getenv("STT_RESPONSE_FORMAT", "text")  # 响应格式 (text, json, verbose_json)
+    STT_LANGUAGE = os.getenv("STT_LANGUAGE", "zh")  # 语言代码（ISO 639-1），"zh"表示中文，"zh-CN"可选，默认"zh"确保简体中文输出
     
     # TTS（文本转语音）配置
     TTS_MAX_TEXT_LENGTH = int(os.getenv("TTS_MAX_TEXT_LENGTH", "4096"))  # 最大文本长度 (字符数)
