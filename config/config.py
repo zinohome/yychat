@@ -122,6 +122,12 @@ class Config:
     MEMORY_RETRIEVAL_LIMIT = int(os.getenv("MEMORY_RETRIEVAL_LIMIT", "5"))
     MEMORY_RETRIEVAL_TIMEOUT = float(os.getenv("MEMORY_RETRIEVAL_TIMEOUT", "0.5"))
     
+    # 历史消息限制配置
+    # 发送给模型的历史消息最大数量（保留最近的N条消息，避免请求过大）
+    # 建议值：20-30条（既能保持对话连贯性，又不会导致token消耗过大）
+    # 默认值：30条（约15轮对话，与前端保持一致）
+    MAX_MESSAGE_HISTORY_COUNT = int(os.getenv("MAX_MESSAGE_HISTORY_COUNT", "30"))
+    
     # 实时语音配置
     REALTIME_VOICE_ENABLED = os.getenv("REALTIME_VOICE_ENABLED", "true").lower() == "true"
     REALTIME_VOICE_MODEL = os.getenv("REALTIME_VOICE_MODEL", "gpt-4o-realtime-preview-2024-12-17")

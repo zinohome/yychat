@@ -156,9 +156,11 @@ class ChatEngine(BaseEngine):
             
             # 创建messages的深拷贝，避免修改原始列表
             messages_copy = [msg.copy() for msg in messages]
-            # 若历史过长，仅保留最后3条，减少请求体体积
-            if len(messages_copy) > 3:
-                messages_copy = messages_copy[-3:]
+            # 若历史过长，仅保留最近的N条消息，减少请求体体积和token消耗
+            max_history = config.MAX_MESSAGE_HISTORY_COUNT
+            if len(messages_copy) > max_history:
+                messages_copy = messages_copy[-max_history:]
+                log.debug(f"历史消息过多，已限制为最近{max_history}条消息")
             
             log.debug(f"原始消息: {messages_copy}")
             
