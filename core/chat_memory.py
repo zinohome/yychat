@@ -419,9 +419,11 @@ class AsyncChatMemory:
         # 检查缓存
         cache_key = self._get_cache_key(conversation_id, query, limit)
         if cache_key in self._memory_cache:
-            log.debug(f"Memory缓存命中: {cache_key[:8]}...")
-            return self._memory_cache[cache_key]
+            cached_result = self._memory_cache[cache_key]
+            log.debug(f"💾 Memory缓存命中: conversation_id={conversation_id}, cache_key={cache_key[:8]}..., 返回{len(cached_result)}条记忆")
+            return cached_result
         
+        log.debug(f"🔍 开始Memory检索: conversation_id={conversation_id}, query='{query[:100]}...', limit={limit}")
         try:
             # 使用 asyncio.wait_for 实现超时
             result = await asyncio.wait_for(
@@ -431,14 +433,14 @@ class AsyncChatMemory:
             
             # 缓存结果
             self._memory_cache[cache_key] = result
-            log.debug(f"Memory检索完成，结果已缓存: {len(result)}条记忆")
+            log.debug(f"✅ Memory检索完成，结果已缓存: conversation_id={conversation_id}, 找到{len(result)}条记忆, cache_key={cache_key[:8]}...")
             
             return result
         except asyncio.TimeoutError:
-            log.warning(f"Memory检索超时 ({self.config.MEMORY_RETRIEVAL_TIMEOUT}s)")
+            log.warning(f"⏱️ Memory检索超时: conversation_id={conversation_id}, timeout={self.config.MEMORY_RETRIEVAL_TIMEOUT}s")
             return []
         except Exception as e:
-            log.error(f"Memory检索失败: {e}")
+            log.error(f"❌ Memory检索失败: conversation_id={conversation_id}, error={e}", exc_info=True)
             return []
     
     async def _retrieve_memory(self, conversation_id: str, query: str, limit: int) -> list:
@@ -446,43 +448,59 @@ class AsyncChatMemory:
         try:
             # 预处理查询
             processed_query = ' '.join(query.strip().split())[:500]
+            log.debug(f"🔍 _retrieve_memory: conversation_id={conversation_id}, processed_query='{processed_query[:100]}...', limit={limit}")
             
             # 异步调用Memory
             try:
+                log.debug(f"🔍 尝试使用 memory.get_relevant() 方法")
                 memories = await self.memory.get_relevant(
                     processed_query, 
                     limit=limit, 
                     user_id=conversation_id
                 )
+                log.debug(f"✅ 使用 get_relevant() 成功，返回类型: {type(memories)}")
             except AttributeError:
                 try:
+                    log.debug(f"🔍 get_relevant() 不存在，尝试使用 memory.search() 方法")
                     memories = await self.memory.search(
                         processed_query, 
                         limit=limit, 
                         user_id=conversation_id
                     )
+                    log.debug(f"✅ 使用 search() 成功，返回类型: {type(memories)}")
                 except AttributeError:
+                    log.debug(f"🔍 search() 不存在，尝试使用 memory.get() 方法")
                     memories = await self.memory.get(
                         processed_query, 
                         user_id=conversation_id
                     )
+                    log.debug(f"✅ 使用 get() 成功，返回类型: {type(memories)}")
                     if isinstance(memories, list) and len(memories) > limit:
                         memories = memories[:limit]
+                        log.debug(f"📝 截取记忆到limit={limit}条")
             
             # 处理返回格式
             if isinstance(memories, dict) and 'results' in memories:
-                return [mem.get('content', str(mem)) for mem in memories['results']]
+                result = [mem.get('content', str(mem)) for mem in memories['results']]
+                log.debug(f"📝 处理dict格式结果，提取到{len(result)}条记忆")
+                return result
             elif isinstance(memories, list):
-                return [mem.get('content', str(mem)) for mem in memories]
+                result = [mem.get('content', str(mem)) if isinstance(mem, dict) else str(mem) for mem in memories]
+                log.debug(f"📝 处理list格式结果，提取到{len(result)}条记忆")
+                return result
             else:
+                log.debug(f"⚠️ 未知的记忆返回格式: {type(memories)}, 返回空列表")
                 return []
         except Exception as e:
-            log.error(f"_retrieve_memory error: {e}")
+            log.error(f"❌ _retrieve_memory error: conversation_id={conversation_id}, error={e}", exc_info=True)
             return []
     
     async def add_message(self, conversation_id: str, message: dict):
         """异步添加消息"""
         try:
+            content_preview = str(message.get("content", ""))[:100]  # 只记录前100个字符
+            log.debug(f"💾 开始添加消息到记忆: conversation_id={conversation_id}, role={message.get('role')}, content='{content_preview}...'")
+            
             # 清除缓存
             self._invalidate_cache(conversation_id)
             
@@ -491,12 +509,14 @@ class AsyncChatMemory:
                 metadata["timestamp"] = message["timestamp"]
             
             if self.is_local:
+                log.debug(f"💾 使用本地模式添加消息: conversation_id={conversation_id}")
                 await self.memory.add(
                     message["content"],
                     user_id=conversation_id,
                     metadata=metadata
                 )
             else:
+                log.debug(f"💾 使用API模式添加消息: conversation_id={conversation_id}")
                 await self.memory.add(
                     messages=[{
                         "role": message["role"],
@@ -505,17 +525,22 @@ class AsyncChatMemory:
                     user_id=conversation_id,
                     metadata=metadata
                 )
-            log.debug("异步消息添加成功")
+            log.debug(f"✅ 异步消息添加成功: conversation_id={conversation_id}, role={message.get('role')}")
         except Exception as e:
-            log.error(f"Failed to add message asynchronously: {e}")
+            log.error(f"❌ 异步消息添加失败: conversation_id={conversation_id}, error={e}", exc_info=True)
     
     async def add_messages_batch(self, conversation_id: str, messages: list):
         """异步批量添加消息"""
         try:
+            log.debug(f"💾 开始批量添加消息到记忆: conversation_id={conversation_id}, 消息数量={len(messages)}")
+            
             # 清除缓存
             self._invalidate_cache(conversation_id)
             
-            for message in messages:
+            for idx, message in enumerate(messages):
+                content_preview = str(message.get("content", ""))[:50]  # 只记录前50个字符
+                log.debug(f"💾 添加第{idx+1}/{len(messages)}条消息: conversation_id={conversation_id}, role={message.get('role')}, content='{content_preview}...'")
+                
                 metadata = {"role": message["role"]}
                 if "timestamp" in message and message["timestamp"] is not None:
                     metadata["timestamp"] = message["timestamp"]
@@ -536,9 +561,9 @@ class AsyncChatMemory:
                         metadata=metadata
                     )
             
-            log.debug(f"异步批量添加 {len(messages)} 条消息成功: conversation_id={conversation_id}")
+            log.debug(f"✅ 异步批量添加 {len(messages)} 条消息成功: conversation_id={conversation_id}")
         except Exception as e:
-            log.error(f"异步批量添加消息失败: {e}")
+            log.error(f"❌ 异步批量添加消息失败: conversation_id={conversation_id}, error={e}", exc_info=True)
             raise
 
     async def get_all_memory(self, conversation_id: str) -> list:

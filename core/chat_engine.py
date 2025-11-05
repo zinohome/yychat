@@ -184,8 +184,11 @@ class ChatEngine(BaseEngine):
             # 从记忆中检索相关内容
             if config.ENABLE_MEMORY_RETRIEVAL and conversation_id != "default" and messages_copy:
                 memory_start = time.time()
+                query_text = messages_copy[-1]["content"][:100]  # 只记录前100个字符
+                log.debug(f"🔍 开始检索记忆: conversation_id={conversation_id}, query='{query_text}...'")
                 relevant_memories = await self.async_chat_memory.get_relevant_memory(conversation_id, messages_copy[-1]["content"])
                 metrics.memory_retrieval_time = time.time() - memory_start
+                log.debug(f"🔍 记忆检索完成: conversation_id={conversation_id}, 耗时={metrics.memory_retrieval_time:.3f}s, 找到{len(relevant_memories)}条记忆")
                 
                 # 检查是否命中缓存（通过检索时间判断）
                 metrics.memory_cache_hit = metrics.memory_retrieval_time < 0.01  # 小于10ms认为是缓存命中
@@ -193,15 +196,23 @@ class ChatEngine(BaseEngine):
                 if relevant_memories:
                     memory_text = "\n".join(relevant_memories)
                     memory_section = f"参考记忆：\n{memory_text}"
-                    log.debug(f"检索到相关记忆 {len(relevant_memories)} 条")
+                    log.debug(f"✅ 检索到相关记忆 {len(relevant_memories)} 条，内容预览: {memory_text[:200]}...")
                     
                     # 使用新的token预算模块检查是否应该包含记忆
                     max_tokens = getattr(config, 'OPENAI_MAX_TOKENS', 8192)
                     if not should_include_memory(messages_copy, memory_section, max_tokens):
-                        log.warning("避免超出模型token限制，不添加记忆到系统提示")
+                        log.warning("⚠️ 避免超出模型token限制，不添加记忆到系统提示")
                         memory_section = ""
+                    else:
+                        log.debug(f"✅ 记忆已添加到系统提示，包含 {len(relevant_memories)} 条记忆")
+                else:
+                    log.debug(f"⚠️ 未检索到相关记忆: conversation_id={conversation_id}")
             elif not config.ENABLE_MEMORY_RETRIEVAL:
-                log.debug("Memory检索已禁用")
+                log.debug("❌ Memory检索已禁用 (ENABLE_MEMORY_RETRIEVAL=false)")
+            elif conversation_id == "default":
+                log.debug(f"⚠️ Memory检索跳过: conversation_id='default' (默认会话不使用记忆)")
+            elif not messages_copy:
+                log.debug(f"⚠️ Memory检索跳过: messages_copy为空")
             
             # 获取人格的系统提示
             if personality_id:
@@ -712,6 +723,8 @@ class ChatEngine(BaseEngine):
     async def _async_save_message_to_memory(self, conversation_id: str, messages: list):
         """异步保存消息到记忆，使用mem0的原生AsyncMemory API"""
         try:
+            log.debug(f"💾 开始保存消息到记忆: conversation_id={conversation_id}, 总消息数={len(messages)}, MEMORY_SAVE_MODE={config.MEMORY_SAVE_MODE}")
+            
             # 根据配置决定保存哪些消息
             messages_to_save = []
             
@@ -730,21 +743,22 @@ class ChatEngine(BaseEngine):
                 log.warning(f"未知的MEMORY_SAVE_MODE配置值: {config.MEMORY_SAVE_MODE}，默认保存所有消息")
             
             if messages_to_save:
-                log.debug(f"使用原生异步API保存消息到记忆: 模式={config.MEMORY_SAVE_MODE}, 消息数量={len(messages_to_save)}, conversation_id={conversation_id}")
+                roles = [msg.get("role") for msg in messages_to_save]
+                log.debug(f"💾 准备保存消息到记忆: conversation_id={conversation_id}, 模式={config.MEMORY_SAVE_MODE}, 消息数量={len(messages_to_save)}, roles={roles}")
                 
                 # 记录将要保存的消息内容（为了避免日志过大，可以只记录第一条和最后一条）
                 if len(messages_to_save) > 0:
-                    log.debug(f"第一条消息内容预览: {messages_to_save[0].get('content', '')[:100]}...")
+                    log.debug(f"💾 第一条消息预览: conversation_id={conversation_id}, role={messages_to_save[0].get('role')}, content='{messages_to_save[0].get('content', '')[:100]}...'")
                     if len(messages_to_save) > 1:
-                        log.debug(f"最后一条消息内容预览: {messages_to_save[-1].get('content', '')[:100]}...")
+                        log.debug(f"💾 最后一条消息预览: conversation_id={conversation_id}, role={messages_to_save[-1].get('role')}, content='{messages_to_save[-1].get('content', '')[:100]}...'")
                 
                 # 批量保存消息
                 await self.async_chat_memory.add_messages_batch(conversation_id, messages_to_save)
-                log.debug("使用原生异步API保存消息到记忆完成")
+                log.debug(f"✅ 消息保存到记忆成功: conversation_id={conversation_id}, 保存了{len(messages_to_save)}条消息")
             else:
-                log.debug(f"根据配置 MEMORY_SAVE_MODE={config.MEMORY_SAVE_MODE}，没有消息需要保存到记忆")
+                log.debug(f"⚠️ 根据配置 MEMORY_SAVE_MODE={config.MEMORY_SAVE_MODE}，没有消息需要保存到记忆: conversation_id={conversation_id}")
         except Exception as e:
-            log.error(f"使用原生异步API保存消息到记忆失败: {e}", exc_info=True)
+            log.error(f"❌ 保存消息到记忆失败: conversation_id={conversation_id}, error={e}", exc_info=True)
 
     # 保留原有的_save_message_to_memory_async方法以保持向后兼容
     async def _save_message_to_memory_async(self, conversation_id: str, message: dict):
